@@ -2,20 +2,16 @@
 const crypto = require('crypto');
 
 const API_TOKEN     = process.env.API_TOKEN;
-const SESSION_TTL   = 8 * 60 * 60 * 1000; // 8 hours
+const SESSION_TTL   = 8 * 60 * 60 * 1000;
 const COOKIE_NAME   = 'lm_session';
+const isProd        = process.env.NODE_ENV === 'production';
 
 if (!API_TOKEN) {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('FATAL: API_TOKEN is not set.');
-    process.exit(1);
-  } else {
-    console.warn('⚠️  WARNING: API_TOKEN not set — auth disabled (dev only)');
-  }
+  if (isProd) { console.error('FATAL: API_TOKEN is not set.'); process.exit(1); }
+  else { console.warn('WARNING: API_TOKEN not set'); }
 }
 
-// In-memory single-user session
-let activeSession = null; // { token, expires }
+let activeSession = null;
 
 function safeCompare(a, b) {
   try {
@@ -29,10 +25,11 @@ function safeCompare(a, b) {
   } catch { return false; }
 }
 
+// sameSite must be 'none' for cross-origin cookies (Netlify -> Render)
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure:   process.env.NODE_ENV === 'production',
-  sameSite: 'strict',
+  secure:   isProd,
+  sameSite: isProd ? 'none' : 'lax',
   maxAge:   SESSION_TTL,
   path:     '/',
 };
@@ -66,7 +63,7 @@ function auth(req, res, next) {
   if (!tok || !activeSession || Date.now() > activeSession.expires || !safeCompare(tok, activeSession.token)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  activeSession.expires = Date.now() + SESSION_TTL; // sliding window
+  activeSession.expires = Date.now() + SESSION_TTL;
   next();
 }
 
