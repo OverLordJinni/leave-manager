@@ -1,7 +1,7 @@
 {
   "name": "leave-manager-backend",
-  "version": "1.0.0",
-  "description": "Leave Manager API — Supabase edition",
+  "version": "2.0.0",
+  "description": "Leave Manager API — Supabase Auth multi-user edition",
   "main": "src/index.js",
   "engines": { "node": "18.x" },
   "scripts": {
@@ -10,9 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "bcryptjs":              "^2.4.3",
     "dotenv":                "^16.4.5",
-    "cookie-parser":         "^1.4.6",
     "cors":                  "^2.8.5",
     "express":               "^4.18.2",
     "express-rate-limit":    "^7.2.0",
