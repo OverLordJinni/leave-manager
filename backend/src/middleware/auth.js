@@ -1,134 +1,258 @@
 // src/middleware/auth.js
-// Auth via Supabase Auth JWT — verify token, extract user_id
-const { createClient } = require('@supabase/supabase-js');
+// Email + password auth backed by Supabase users table.
+// Passkey credentials persisted to passkey_credentials table.
+const crypto   = require('crypto');
+const bcrypt   = require('bcryptjs');
+const { supabase } = require('../db/supabase');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const SESSION_TTL  = 30 * 24 * 60 * 60 * 1000; // 30 days
+const COOKIE_NAME  = 'lm_session';
+const isProd       = process.env.NODE_ENV === 'production';
 
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { autoRefreshToken: false, persistSession: false }
-});
+// Dummy hash for constant-time rejection (prevents user enumeration via timing)
+const DUMMY_HASH = '$2a$12$' + 'x'.repeat(53);
 
-const isProd = process.env.NODE_ENV === 'production';
+// ── Session store (in-memory, per process) ────────────────────────────────────
+const sessions          = new Map(); // token → { expires, userId }
+const pendingChallenges = new Map(); // challengeId → { challenge, expires }
 
-// Auth middleware — expects Authorization: Bearer <supabase_access_token>
-async function auth(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Missing authorization header' });
-  }
-  const token = authHeader.slice(7);
-  try {
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) return res.status(401).json({ error: 'Invalid or expired token' });
-    req.user   = user;
-    req.userId = user.id;
-    next();
-  } catch {
-    return res.status(401).json({ error: 'Token verification failed' });
-  }
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of sessions)          { if (now > v.expires) sessions.delete(k); }
+  for (const [k, v] of pendingChallenges) { if (now > v.expires) pendingChallenges.delete(k); }
+}, 60 * 60 * 1000);
+
+// ── Cookie options ────────────────────────────────────────────────────────────
+const COOKIE_OPTS = {
+  httpOnly: true,
+  secure:   isProd,
+  sameSite: isProd ? 'none' : 'lax',
+  maxAge:   SESSION_TTL,
+  path:     '/',
+};
+
+function createSession(res, userId) {
+  const tok = crypto.randomBytes(32).toString('hex');
+  sessions.set(tok, { expires: Date.now() + SESSION_TTL, userId });
+  res.cookie(COOKIE_NAME, tok, COOKIE_OPTS);
+  return tok;
 }
 
-// Signup — creates user in Supabase Auth, seeds default settings
+// ── Signup ────────────────────────────────────────────────────────────────────
 async function handleSignup(req, res) {
   const { email, password, name } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
-  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  try {
-    const { data, error } = await supabase.auth.admin.createUser({
-      email: email.toLowerCase().trim(),
-      password,
-      user_metadata: { name: (name || '').trim() },
-      email_confirm: true,
-    });
-    if (error) {
-      if (error.message?.toLowerCase().includes('already')) {
-        return res.status(409).json({ error: 'An account with this email already exists' });
-      }
-      return res.status(400).json({ error: error.message });
-    }
-    // Seed default settings for new user
-    await supabase.from('settings').insert([
-      { user_id: data.user.id, key: 'contractRenewal', value: '' },
-      { user_id: data.user.id, key: 'lastResetDate',   value: '' },
-      { user_id: data.user.id, key: 'onboarded',       value: 'false' },
-    ]);
-    return res.status(201).json({ ok: true, message: 'Account created.' });
-  } catch (err) {
-    console.error('Signup error:', err.message);
-    return res.status(500).json({ error: 'Signup failed' });
+  if (!email || !password)
+    return res.status(400).json({ error: 'Email and password are required' });
+
+  const emailClean = email.toLowerCase().trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean))
+    return res.status(400).json({ error: 'Invalid email address' });
+  if (password.length < 8)
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+  // If ADMIN_EMAIL is set, restrict signup to that address only
+  const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+  if (adminEmail && emailClean !== adminEmail)
+    return res.status(403).json({ error: 'Signup is restricted to the configured admin email' });
+
+  // If no ADMIN_EMAIL, enforce single-user: only one account can exist
+  if (!adminEmail) {
+    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    if (count > 0)
+      return res.status(403).json({ error: 'An account already exists. This is a single-user app.' });
   }
+
+  // Prevent duplicate accounts
+  const { data: existing } = await supabase
+    .from('users').select('id').eq('email', emailClean).maybeSingle();
+  if (existing)
+    return res.status(409).json({ error: 'An account with this email already exists' });
+
+  const hash = await bcrypt.hash(password, 12);
+  const { data: user, error } = await supabase
+    .from('users')
+    .insert({ email: emailClean, password_hash: hash, name: (name || '').trim().slice(0, 100) || null })
+    .select('id').single();
+
+  if (error) {
+    console.error(JSON.stringify({ event: 'signup_error', error: error.message }));
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+
+  console.log(JSON.stringify({ event: 'signup', userId: user.id }));
+  createSession(res, user.id);
+  return res.status(201).json({ ok: true });
 }
 
-// Login — returns JWT tokens
+// ── Login ─────────────────────────────────────────────────────────────────────
 async function handleLogin(req, res) {
   const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
-  try {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.toLowerCase().trim(), password,
-    });
-    if (error) return res.status(401).json({ error: 'Invalid email or password' });
-    return res.json({
-      ok: true,
-      access_token:  data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_in:    data.session.expires_in,
-      user: { id: data.user.id, email: data.user.email, name: data.user.user_metadata?.name || '' }
-    });
-  } catch (err) {
-    console.error('Login error:', err.message);
-    return res.status(500).json({ error: 'Login failed' });
+  if (!email || !password)
+    return res.status(400).json({ error: 'Email and password are required' });
+
+  const emailClean = email.toLowerCase().trim();
+  const { data: user } = await supabase
+    .from('users').select('id, password_hash').eq('email', emailClean).maybeSingle();
+
+  if (!user) {
+    await bcrypt.compare('dummy', DUMMY_HASH); // constant-time padding
+    return res.status(401).json({ error: 'Invalid email or password' });
   }
+
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
+
+  console.log(JSON.stringify({ event: 'login', userId: user.id }));
+  createSession(res, user.id);
+  return res.json({ ok: true });
 }
 
-// Refresh access token
-async function handleRefresh(req, res) {
-  const { refresh_token } = req.body || {};
-  if (!refresh_token) return res.status(400).json({ error: 'refresh_token required' });
-  try {
-    const { data, error } = await supabase.auth.refreshSession({ refresh_token });
-    if (error) return res.status(401).json({ error: 'Session refresh failed' });
-    return res.json({
-      ok: true,
-      access_token:  data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_in:    data.session.expires_in,
-    });
-  } catch {
-    return res.status(500).json({ error: 'Refresh failed' });
-  }
+// ── Session check ─────────────────────────────────────────────────────────────
+function handleMe(req, res) {
+  const tok  = req.cookies?.[COOKIE_NAME];
+  const sess = tok && sessions.get(tok);
+  if (!sess || Date.now() > sess.expires) return res.status(401).json({ error: 'Unauthorized' });
+  sess.expires = Date.now() + SESSION_TTL; // sliding window
+  return res.json({ ok: true });
 }
 
-// Forgot password — sends reset email via Supabase
+// ── Forgot password ───────────────────────────────────────────────────────────
 async function handleForgotPassword(req, res) {
-  const { email } = req.body || {};
-  if (!email) return res.status(400).json({ error: 'Email required' });
+  // Always return 200 to prevent email enumeration
   try {
-    await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
-      redirectTo: process.env.FRONTEND_URL + '/reset-password',
-    });
-  } catch {}
-  // Always return success — prevents user enumeration
-  return res.json({ ok: true, message: 'If that email exists, a reset link has been sent.' });
-}
-
-// Logout
-async function handleLogout(req, res) {
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    try { await supabase.auth.admin.signOut(authHeader.slice(7)); } catch {}
+    const { email } = req.body || {};
+    if (email) {
+      const { data: user } = await supabase
+        .from('users').select('id').eq('email', email.toLowerCase().trim()).maybeSingle();
+      if (user) {
+        const token   = crypto.randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        await supabase.from('password_reset_tokens')
+          .insert({ user_id: user.id, token, expires_at: expires });
+        console.log(JSON.stringify({ event: 'password_reset_token_created', userId: user.id }));
+        // TODO: Send email with reset link using your email provider (SendGrid, Resend, etc.)
+        // Reset URL: `${process.env.FRONTEND_URL}/reset-password?token=${token}`
+      }
+    }
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'forgot_password_error', error: err.message }));
   }
   return res.json({ ok: true });
 }
 
-// Get current user info
-async function handleMe(req, res) {
-  return res.json({
-    id:    req.user.id,
-    email: req.user.email,
-    name:  req.user.user_metadata?.name || '',
-  });
+// ── Passkey: challenge ────────────────────────────────────────────────────────
+function handlePasskeyChallenge(req, res) {
+  const challenge   = crypto.randomBytes(32).toString('base64url');
+  const challengeId = crypto.randomBytes(16).toString('hex');
+  pendingChallenges.set(challengeId, { challenge, expires: Date.now() + 5 * 60 * 1000 });
+
+  let rpId = 'localhost';
+  try { rpId = new URL(process.env.FRONTEND_URL || 'https://localhost').hostname; } catch {}
+
+  // If the user is logged in, return their userId so the frontend can use it in
+  // the WebAuthn user.id field during registration.
+  const tok    = req.cookies?.[COOKIE_NAME];
+  const sess   = tok && sessions.get(tok);
+  const userId = (sess && Date.now() <= sess.expires) ? sess.userId : null;
+
+  return res.json({ challenge, challengeId, rpId, rpName: 'Leave Manager', userId });
 }
 
-module.exports = { auth, handleSignup, handleLogin, handleRefresh, handleForgotPassword, handleLogout, handleMe };
+// ── Passkey: register (must be authenticated) ─────────────────────────────────
+async function handlePasskeyRegister(req, res) {
+  const tok  = req.cookies?.[COOKIE_NAME];
+  const sess = tok && sessions.get(tok);
+  if (!sess || Date.now() > sess.expires)
+    return res.status(401).json({ error: 'Must be logged in to register a passkey' });
+
+  const { credentialId, publicKey, challengeId } = req.body || {};
+  if (!credentialId || !publicKey || !challengeId)
+    return res.status(400).json({ error: 'credentialId, publicKey, and challengeId are required' });
+
+  const pending = pendingChallenges.get(challengeId);
+  if (!pending || Date.now() > pending.expires)
+    return res.status(400).json({ error: 'Challenge expired — request a new one' });
+  pendingChallenges.delete(challengeId);
+
+  // Upsert: one passkey per user
+  const { error } = await supabase
+    .from('passkey_credentials')
+    .upsert(
+      { user_id: sess.userId, credential_id: credentialId, public_key: publicKey },
+      { onConflict: 'user_id' }
+    );
+
+  if (error) {
+    console.error(JSON.stringify({ event: 'passkey_register_error', error: error.message }));
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+
+  console.log(JSON.stringify({ event: 'passkey_registered', userId: sess.userId }));
+  return res.json({ ok: true });
+}
+
+// ── Passkey: login ────────────────────────────────────────────────────────────
+async function handlePasskeyLogin(req, res) {
+  const { credentialId, challengeId, verified } = req.body || {};
+  if (!credentialId || !challengeId)
+    return res.status(400).json({ error: 'credentialId and challengeId are required' });
+
+  const pending = pendingChallenges.get(challengeId);
+  if (!pending || Date.now() > pending.expires)
+    return res.status(400).json({ error: 'Challenge expired — request a new one' });
+
+  if (verified !== true)
+    return res.status(401).json({ error: 'Passkey verification failed' });
+
+  const { data: cred } = await supabase
+    .from('passkey_credentials')
+    .select('user_id')
+    .eq('credential_id', credentialId)
+    .maybeSingle();
+
+  if (!cred) return res.status(401).json({ error: 'Passkey not recognised' });
+
+  pendingChallenges.delete(challengeId);
+  console.log(JSON.stringify({ event: 'passkey_login', userId: cred.user_id }));
+  createSession(res, cred.user_id);
+  return res.json({ ok: true });
+}
+
+// ── Passkey: status ───────────────────────────────────────────────────────────
+async function handlePasskeyStatus(req, res) {
+  const tok  = req.cookies?.[COOKIE_NAME];
+  const sess = tok && sessions.get(tok);
+  if (!sess || Date.now() > sess.expires) return res.json({ registered: false });
+
+  const { data } = await supabase
+    .from('passkey_credentials')
+    .select('id')
+    .eq('user_id', sess.userId)
+    .maybeSingle();
+  return res.json({ registered: !!data });
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+function handleLogout(req, res) {
+  const tok = req.cookies?.[COOKIE_NAME];
+  if (tok) sessions.delete(tok);
+  res.clearCookie(COOKIE_NAME, { path: '/', sameSite: isProd ? 'none' : 'lax', secure: isProd });
+  return res.json({ ok: true });
+}
+
+// ── Auth middleware ───────────────────────────────────────────────────────────
+function auth(req, res, next) {
+  const tok  = req.cookies?.[COOKIE_NAME];
+  const sess = tok && sessions.get(tok);
+  if (!sess || Date.now() > sess.expires)
+    return res.status(401).json({ error: 'Unauthorized' });
+  sess.expires = Date.now() + SESSION_TTL; // sliding window
+  req.userId = sess.userId;
+  next();
+}
+
+module.exports = {
+  auth, handleLogin, handleLogout, handleSignup, handleMe, handleForgotPassword,
+  COOKIE_OPTS, COOKIE_NAME,
+  handlePasskeyChallenge, handlePasskeyRegister, handlePasskeyLogin, handlePasskeyStatus,
+};

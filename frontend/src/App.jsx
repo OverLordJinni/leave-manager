@@ -21,6 +21,14 @@ function fmt(s) {
 function uid() { return Math.random().toString(36).slice(2,9); }
 const today = () => new Date().toISOString().split('T')[0];
 
+// ─── WebAuthn helpers ─────────────────────────────────────────────────────────
+const b64urlToUint8 = s => {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=');
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+};
+const uint8ToB64url = u =>
+  btoa(String.fromCharCode(...new Uint8Array(u))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
 // âââ Design tokens ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const C = {
   bg:'#F8F7F4', surface:'#FFFFFF', border:'#EDECE8', text:'#111111',
@@ -249,10 +257,12 @@ function AuthInput({ label, type='text', value, onChange, placeholder, autoCompl
 }
 
 function LoginForm({ onLogin, onSwitch }) {
-  const [email, setEmail]     = useState('');
-  const [pw, setPw]           = useState('');
-  const [err, setErr]         = useState('');
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail]           = useState('');
+  const [pw, setPw]                 = useState('');
+  const [err, setErr]               = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [passkeyLoading, setPKLoad] = useState(false);
+
   async function submit(e) {
     e?.preventDefault?.();
     if (!email.trim() || !pw) { setErr('Email and password are required.'); return; }
@@ -261,6 +271,36 @@ function LoginForm({ onLogin, onSwitch }) {
     catch { setErr('Invalid email or password.'); }
     finally { setLoading(false); }
   }
+
+  async function signInWithPasskey() {
+    if (!window.PublicKeyCredential) {
+      setErr('Passkeys are not supported on this browser.');
+      return;
+    }
+    setPKLoad(true); setErr('');
+    try {
+      const { challenge, challengeId, rpId } = await api.getPasskeyChallenge();
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge:          b64urlToUint8(challenge),
+          rpId,
+          allowCredentials:   [],        // discoverable credential (resident key)
+          userVerification:   'required',
+          timeout:            60000,
+        },
+      });
+      if (!assertion) throw new Error('No credential returned');
+      await api.loginPasskey({ credentialId: assertion.id, challengeId, verified: true });
+      onLogin();
+    } catch (e) {
+      if (e.name === 'NotAllowedError') setErr('Passkey sign-in was cancelled.');
+      else if (e.message === 'Passkey not recognised') setErr('No passkey found for this device. Sign in with your password first.');
+      else setErr(e.message || 'Passkey sign-in failed.');
+    } finally { setPKLoad(false); }
+  }
+
+  const hasPasskeySupport = !!window.PublicKeyCredential;
+
   return (
     <AuthCard subtitle="Sign in to your account">
       <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -272,6 +312,19 @@ function LoginForm({ onLogin, onSwitch }) {
           Sign In <Icon n="arrow" size={16} color="#fff"/>
         </Btn>
       </form>
+      {hasPasskeySupport && (
+        <>
+          <div style={{ display:'flex', alignItems:'center', gap:10, margin:'2px 0' }}>
+            <div style={{ flex:1, height:1, background:C.border }}/>
+            <span style={{ fontSize:11, color:C.muted, fontWeight:600 }}>OR</span>
+            <div style={{ flex:1, height:1, background:C.border }}/>
+          </div>
+          <Btn full variant="ghost" onClick={signInWithPasskey} loading={passkeyLoading}
+            style={{ borderRadius:14, padding:14, fontSize:15 }}>
+            <Icon n="lock" size={16}/> Sign in with Passkey
+          </Btn>
+        </>
+      )}
       <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
         <button onClick={()=>onSwitch('forgot')} style={{ background:'none', border:'none', fontSize:13, color:C.muted, cursor:'pointer' }}>Forgot password?</button>
         <p style={{ fontSize:13, color:C.muted, margin:0 }}>No account?{' '}
@@ -535,7 +588,7 @@ function HistoryRow({ item, onDelete }) {
 }
 
 // âââ Apply Form âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
+function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast }) {
   const t = today();
   const [form, setForm]   = useState({ typeId:leaveTypes[0]?.id||'', start:t, end:t, reason:'' });
   const [sub, setSub]     = useState(false);
@@ -559,7 +612,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
         setLinks(vl);
       } else { setLinks([]); }
       onSuccess();
-    } catch (err) { alert(err.message); }
+    } catch (err) { toast?.(err.message, 'error'); }
     finally { setSub(false); }
   }
 
@@ -714,24 +767,108 @@ function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
 
 // âââ Settings âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function AccountTab({ onClose, onLogout, toast }) {
-  const [loading, setLoading] = useState(false);
+  const [logoutLoading, setLogoutLoad]  = useState(false);
+  const [passkeyStatus, setPasskeyStatus] = useState(null); // null=loading, bool=known
+  const [pkLoading, setPkLoad]          = useState(false);
+
+  useEffect(() => {
+    api.getPasskeyStatus()
+      .then(({ registered }) => setPasskeyStatus(registered))
+      .catch(() => setPasskeyStatus(false));
+  }, []);
+
   async function handleLogout() {
-    setLoading(true);
+    setLogoutLoad(true);
     try { await api.logout(); onLogout(); onClose(); }
     catch { toast('Sign out failed', 'error'); }
-    finally { setLoading(false); }
+    finally { setLogoutLoad(false); }
   }
+
+  async function registerPasskey() {
+    if (!window.PublicKeyCredential) {
+      toast('Passkeys are not supported on this browser.', 'error'); return;
+    }
+    setPkLoad(true);
+    try {
+      const { challenge, challengeId, rpId, rpName, userId } = await api.getPasskeyChallenge();
+
+      // Convert UUID to 16-byte Uint8Array for WebAuthn user.id
+      const userIdBytes = userId
+        ? new Uint8Array(userId.replace(/-/g, '').match(/.{2}/g).map(b => parseInt(b, 16)))
+        : crypto.getRandomValues(new Uint8Array(16));
+
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge:  b64urlToUint8(challenge),
+          rp:         { id: rpId, name: rpName || 'Leave Manager' },
+          user:       { id: userIdBytes, name: 'user', displayName: 'Leave Manager' },
+          pubKeyCredParams: [
+            { type: 'public-key', alg: -7   }, // ES256
+            { type: 'public-key', alg: -257 }, // RS256
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: 'platform',
+            userVerification:        'required',
+            residentKey:             'preferred',
+          },
+          timeout: 60000,
+        },
+      });
+      if (!credential) throw new Error('No credential created');
+
+      // Extract public key bytes (Level 3 API with fallback)
+      let pkBytes;
+      try { pkBytes = credential.response.getPublicKey?.() || credential.response.clientDataJSON; }
+      catch { pkBytes = credential.response.clientDataJSON; }
+
+      await api.registerPasskey({
+        credentialId: credential.id,
+        publicKey:    uint8ToB64url(pkBytes),
+        challengeId,
+      });
+      toast('Passkey registered! You can now sign in with biometrics.');
+      setPasskeyStatus(true);
+    } catch (e) {
+      if (e.name === 'NotAllowedError') toast('Passkey registration cancelled.', 'error');
+      else toast(e.message || 'Failed to register passkey.', 'error');
+    } finally { setPkLoad(false); }
+  }
+
   return (
-    <div style={{ paddingBottom:16 }}>
-      <p style={{ fontSize:13, color:C.muted, lineHeight:1.6, margin:'0 0 20px' }}>
-        You are signed in. Sessions last 30 days across all your devices.
+    <div style={{ display:'flex', flexDirection:'column', gap:16, paddingBottom:16 }}>
+      {window.PublicKeyCredential && (
+        <div style={{ background:C.faint, borderRadius:14, padding:'14px 16px', border:`1.5px solid ${C.border}` }}>
+          <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:10 }}>
+            Passkey (Biometric Sign-in)
+          </p>
+          {passkeyStatus === null ? (
+            <p style={{ fontSize:13, color:C.muted }}>Checking…</p>
+          ) : passkeyStatus ? (
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <Icon n="check" size={16} color={C.green}/>
+              <p style={{ fontSize:13, color:C.green, fontWeight:600 }}>Passkey active — sign in with biometrics</p>
+            </div>
+          ) : (
+            <>
+              <p style={{ fontSize:12, color:C.muted, lineHeight:1.6, marginBottom:10 }}>
+                Register your fingerprint or Face ID to sign in without a password.
+              </p>
+              <Btn variant="ghost" full sm onClick={registerPasskey} loading={pkLoading}>
+                <Icon n="lock" size={15}/> Register Passkey
+              </Btn>
+            </>
+          )}
+        </div>
+      )}
+      <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
+        You are signed in. Sessions last 30 days.
       </p>
-      <Btn full variant="danger" onClick={handleLogout} loading={loading}
+      <Btn full variant="danger" onClick={handleLogout} loading={logoutLoading}
         style={{ borderRadius:14, padding:14, fontSize:15 }}>
         Sign Out
       </Btn>
-      <p style={{ fontSize:11, color:C.muted, textAlign:'center', marginTop:8, lineHeight:1.5 }}>
-        Signs you out of this device only.
+      <p style={{ fontSize:11, color:C.muted, textAlign:'center', marginTop:-8, lineHeight:1.5 }}>
+        Signs you out on this device only.
       </p>
     </div>
   );
@@ -742,20 +879,19 @@ function SettingsModal({ leaveTypes, recipients, settings, onClose, onRefresh, o
   return (
     <Sheet title="Settings" onClose={onClose}>
       <div style={{ display:'flex', background:C.faint, borderRadius:13, padding:4, marginBottom:22, gap:3 }}>
-        {[['leaves','ð¿','Leaves'],['recipients','ð²','Viber'],['contract','ð','Contract']].map(([id,em,label]) => (
+        {[['leaves','ð¿','Leaves'],['recipients','ð²','Viber'],['contract','ð','Contract'],['account','ð¤','Account']].map(([id,em,label]) => (
           <button key={id} onClick={()=>setTab(id)} style={{ flex:1, padding:'9px 4px', border:'none', borderRadius:11,
-            fontWeight:600, fontSize:12, cursor:'pointer', fontFamily:"'DM Sans',sans-serif",
+            fontWeight:600, fontSize:11, cursor:'pointer'', fontFamily:"'DM Sans',sans-serif",
             background:tab===id?C.surface:'transparent', color:tab===id?C.text:C.muted,
             boxShadow:tab===id?'0 1px 5px rgba(0,0,0,.09)':'none', transition:'all .15s' }}>
             {em} {label}
           </button>
         ))}
       </div>
-      {tab==='leaves'     && <LeaveTypesTab  leaveTypes={leaveTypes} onRefresh={onRefresh} toast={toast}/>}
-      {tab==='recipients' && <RecipientsTab  recipients={recipients} onRefresh={onRefresh} toast={toast}/>}
-      {tab==='contract'   && <ContractTab    settings={settings}    onRefresh={onRefresh} toast={toast}/>}
-      {tab==='account'    && <AccountTab onClose={onClose} onLogout={onLogout} toast={toast}/>}
-      {tab==='account'    && <AccountTab onClose={onClose} onLogout={onLogout} toast={toast}/>}
+      {tab==='leaves'     && <LeaveTypesTab leaveTypes={leaveTypes} onRefresh={onRefresh} toast={toast}/>}
+      {tab==='recipients' && <RecipientsTab recipients={recipients} onRefresh={onRefresh} toast={toast}/>}
+      {tab==='contract'   && <ContractTab   settings={settings}    onRefresh={onRefresh} toast={toast}/>}
+      {tab==='account'    && <AccountTab    onClose={onClose}      onLogout={onLogout}   toast={toast}/>}
     </Sheet>
   );
 }
@@ -1005,10 +1141,7 @@ export default function App() {
   );
 
 
-  async function onLogout() {
-    setAuthed(false);
-  }
-  async function onLogout() { setAuthed(false); }
+  function onLogout() { setAuthed(false); }
 
   if (!authReady) return (
     <div style={{ minHeight:'100vh', background:C.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -1070,7 +1203,7 @@ export default function App() {
 
         <div style={{ padding:'18px 20px 100px' }}>
           {tab==='home' && <HomeScreen leaveTypes={leaveTypes} settings={settings} history={history} onApply={()=>setApplyOpen(true)} justReset={justReset} onDismissReset={()=>setJustReset(false)}/>}
-          {tab==='apply' && <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setTab('home')} onSuccess={()=>{loadAll();setTab('home');}}/>}
+          {tab==='apply' && <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setTab('home')} onSuccess={()=>{loadAll();setTab('home');}} toast={showToast}/>}
           {tab==='history' && <HistoryScreen leaveTypes={leaveTypes} history={history} onRefresh={loadAll} toast={showToast}/>}
         </div>
 
@@ -1091,11 +1224,11 @@ export default function App() {
         </div>
 
         {applyOpen && <Sheet title="Apply for Leave" onClose={()=>setApplyOpen(false)}>
-          <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setApplyOpen(false)} onSuccess={()=>{loadAll();setApplyOpen(false);showToast('Leave submitted!');}}/>
+          <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setApplyOpen(false)} onSuccess={()=>{loadAll();setApplyOpen(false);showToast('Leave submitted!');}} toast={showToast}/>
         </Sheet>}
 
         {settOpen && <SettingsModal leaveTypes={leaveTypes} recipients={recipients} settings={settings}
-          onClose={()=>setSettOpen(false)} onRefresh={loadAll} toast={showToast}/>}
+          onClose={()=>setSettOpen(false)} onRefresh={loadAll} onLogout={onLogout} toast={showToast}/>}
       </div>
     </>
   );
