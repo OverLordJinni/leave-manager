@@ -350,7 +350,6 @@ function SignupForm({ onLogin, onSwitch }) {
     setLoading(true);
     try {
       await api.signup(email.trim(), pw, name.trim());
-      await api.login(email.trim(), pw);
       onLogin();
     } catch(e) {
       setErr(e.message?.includes('already exists') ? 'An account with this email already exists.' : (e.message || 'Signup failed.'));
@@ -1077,9 +1076,6 @@ export default function App() {
   const [authed,    setAuthed]    = useState(false);
   const [authReady, setAuthReady] = useState(false);
 
-  useEffect(() => {
-    api.restoreSession().then(ok => { if (ok) setAuthed(true); }).finally(() => setAuthReady(true));
-  }, []);
   const [leaveTypes, setLeaveTypes] = useState([]);
   const [history,    setHistory]    = useState([]);
   const [recipients, setRecipients] = useState([]);
@@ -1094,7 +1090,7 @@ export default function App() {
 
   function showToast(msg, type='success') { setToast({ msg, type, key:uid() }); }
 
-  // Listen for 401 events dispatched by api.js
+  // Listen for 401 events dispatched by api.js — only log out if we're not mid-login
   useEffect(() => {
     const h = () => { setAuthed(false); setLoading(false); };
     window.addEventListener('auth:required', h);
@@ -1118,8 +1114,17 @@ export default function App() {
     }
   }
 
+  // On mount: restore session first, then load data only if session exists.
+  // Keeping both operations in one effect prevents a race where blind loadAll()
+  // fires unauthenticated 401s that arrive after a successful login and kick
+  // the user back to the login screen.
   useEffect(() => {
-    loadAll().finally(() => setLoading(false));
+    api.restoreSession().then(ok => {
+      if (ok) { setAuthed(true); return loadAll(); }
+    }).finally(() => {
+      setAuthReady(true);
+      setLoading(false);
+    });
   }, []);
 
   async function onLogin() {
