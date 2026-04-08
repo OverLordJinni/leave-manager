@@ -881,7 +881,7 @@ function SettingsModal({ leaveTypes, recipients, settings, onClose, onRefresh, o
       <div style={{ display:'flex', background:C.faint, borderRadius:13, padding:4, marginBottom:22, gap:3 }}>
         {[['leaves','ð¿','Leaves'],['recipients','ð²','Viber'],['contract','ð','Contract'],['account','ð¤','Account']].map(([id,em,label]) => (
           <button key={id} onClick={()=>setTab(id)} style={{ flex:1, padding:'9px 4px', border:'none', borderRadius:11,
-            fontWeight:600, fontSize:11, cursor:'pointer'', fontFamily:"'DM Sans',sans-serif",
+            fontWeight:600, fontSize:11, cursor:'pointer', fontFamily:"'DM Sans',sans-serif",
             background:tab===id?C.surface:'transparent', color:tab===id?C.text:C.muted,
             boxShadow:tab===id?'0 1px 5px rgba(0,0,0,.09)':'none', transition:'all .15s' }}>
             {em} {label}
