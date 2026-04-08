@@ -11,7 +11,11 @@ const leaveRoutes     = require('./routes/leave');
 const settingsRoutes  = require('./routes/settings');
 const recipientRoutes = require('./routes/recipients');
 const viberRoutes     = require('./routes/viber');
-const { auth, handleLogin, handleLogout, handlePasskeyChallenge, handlePasskeyRegister, handlePasskeyLogin, handlePasskeyStatus } = require('./middleware/auth');
+const {
+  auth,
+  handleLogin, handleLogout, handleSignup, handleMe, handleForgotPassword,
+  handlePasskeyChallenge, handlePasskeyRegister, handlePasskeyLogin, handlePasskeyStatus,
+} = require('./middleware/auth');
 const { seedDefaults } = require('./db/seed');
 
 const app    = express();
@@ -20,27 +24,77 @@ const isProd = process.env.NODE_ENV === 'production';
 const FRONTEND_URL = process.env.FRONTEND_URL;
 if (isProd && !FRONTEND_URL) { console.error('FATAL: FRONTEND_URL must be set.'); process.exit(1); }
 
+// HTTP → HTTPS redirect in production
 app.use((req, res, next) => {
-  if (isProd && req.headers['x-forwarded-proto'] === 'http') return res.redirect(301, `https://${req.headers.host}${req.url}`);
+  if (isProd && req.headers['x-forwarded-proto'] === 'http')
+    return res.redirect(301, `https://${req.headers.host}${req.url}`);
   next();
 });
+
+// Request ID
 app.use((req, res, next) => { req.id = crypto.randomUUID(); res.setHeader('X-Request-Id', req.id); next(); });
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'",'https://fonts.googleapis.com'],fontSrc:["'self'",'https://fonts.gstatic.com'],connectSrc:["'self'"],imgSrc:["'self'",'data:'],frameSrc:["'none'"],objectSrc:["'none'"]}},hsts:isProd?{maxAge:31536000,includeSubDomains:true}:false}));
-app.use(cors({ origin: FRONTEND_URL||'http://localhost:5173', methods:['GET','POST','PUT','PATCH','DELETE','OPTIONS'], allowedHeaders:['Content-Type'], credentials:true }));
-app.use(express.json({ limit:'10kb' }));
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:  ["'self'"],
+      scriptSrc:   ["'self'"],
+      styleSrc:    ["'self'", 'https://fonts.googleapis.com'],
+      fontSrc:     ["'self'", 'https://fonts.gstatic.com'],
+      connectSrc:  ["'self'"],
+      imgSrc:      ["'self'", 'data:'],
+      frameSrc:    ["'none'"],
+      objectSrc:   ["'none'"],
+    },
+  },
+  hsts: isProd ? { maxAge: 31536000, includeSubDomains: true } : false,
+}));
+
+app.use(cors({
+  origin:         FRONTEND_URL || 'http://localhost:5173',
+  methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials:    true,
+}));
+app.use(express.json({ limit: '10kb' }));
 app.use(cookieParser());
-const apiLimiter = rateLimit({ windowMs:60_000, max:60, standardHeaders:true, legacyHeaders:false, message:{error:'Too many requests.'} });
-const authLimiter = rateLimit({ windowMs:15*60_000, max:10, message:{error:'Too many login attempts.'} });
-const healthLimiter = rateLimit({ windowMs:60_000, max:10 });
-app.get('/health', healthLimiter, (_,res) => res.json({ok:true}));
-app.post('/api/auth/login', authLimiter, handleLogin);
-app.post('/api/auth/logout', handleLogout);
-app.get('/api/auth/passkey/challenge', authLimiter, handlePasskeyChallenge);
+
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+const apiLimiter    = rateLimit({ windowMs: 60_000,      max: 60,  standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests.' } });
+const authLimiter   = rateLimit({ windowMs: 15 * 60_000, max: 10,  message: { error: 'Too many login attempts.' } });
+const healthLimiter = rateLimit({ windowMs: 60_000,      max: 10 });
+
+// ── Public routes ─────────────────────────────────────────────────────────────
+app.get('/health', healthLimiter, (_, res) => res.json({ ok: true }));
+
+// Auth — no session required
+app.post('/api/auth/signup',          authLimiter, handleSignup);
+app.post('/api/auth/login',           authLimiter, handleLogin);
+app.post('/api/auth/logout',                       handleLogout);
+app.post('/api/auth/forgot-password', authLimiter, handleForgotPassword);
+app.get( '/api/auth/me',                           handleMe);
+app.get( '/api/auth/passkey/challenge', authLimiter, handlePasskeyChallenge);
+app.post('/api/auth/passkey/login',   authLimiter, handlePasskeyLogin);
+
+// Passkey registration — requires valid session (checked inside handler)
 app.post('/api/auth/passkey/register', authLimiter, handlePasskeyRegister);
-app.post('/api/auth/passkey/login', authLimiter, handlePasskeyLogin);
-app.get('/api/auth/passkey/status', handlePasskeyStatus);
+app.get( '/api/auth/passkey/status',               handlePasskeyStatus);
+
+// ── Protected routes (session required) ──────────────────────────────────────
 app.use('/api', apiLimiter, auth);
-app.use('/api/leave',leaveRoutes);app.use('/api/settings',settingsRoutes);app.use('/api/recipients', recipientRoutes);app.use('/api/viber',viberRoutes);
-app.use((req,res) => res.status(404).json({error:'Not found'}));
-app.use((err, req, res, next) => { console.error(JSON.stringify({requestId:req.id,path:req.path,error:err.message})); res.status(500).json({error:'Internal server error'}); });
-app.listen(PORT, async () => { console.log(`Leave Manager API -- port ${PORT}`); await seedDefaults(); });
+app.use('/api/leave',      leaveRoutes);
+app.use('/api/settings',   settingsRoutes);
+app.use('/api/recipients', recipientRoutes);
+app.use('/api/viber',      viberRoutes);
+
+// ── Catch-all ─────────────────────────────────────────────────────────────────
+app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+app.use((err, req, res, next) => {
+  console.error(JSON.stringify({ requestId: req.id, path: req.path, error: err.message }));
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+app.listen(PORT, async () => {
+  console.log(`Leave Manager API — port ${PORT}`);
+  await seedDefaults();
+});

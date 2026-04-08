@@ -23,32 +23,42 @@ async function req(method, path, body) {
 }
 
 // Auth — email + password
-export const login  = (email, password) => req('POST', '/api/auth/login', { email, password });
-export const logout = () => req('POST', '/api/auth/logout');
+export const login  = (email, password) => req('POST', '/api/auth/login',  { email, password });
+export const logout = ()                => req('POST', '/api/auth/logout');
+export const signup = (email, password, name) => req('POST', '/api/auth/signup', { email, password, name });
+export const forgotPassword = (email)  => req('POST', '/api/auth/forgot-password', { email });
+
+// Session restore — returns true/false, never throws or fires auth:required
+export const restoreSession = async () => {
+  try {
+    const res = await fetch(`${BASE}/api/auth/me`, { credentials: 'include' });
+    return res.ok;
+  } catch { return false; }
+};
 
 // Passkey
-export const getPasskeyChallenge = () => req('GET',  '/api/auth/passkey/challenge');
+export const getPasskeyChallenge = ()  => req('GET',  '/api/auth/passkey/challenge');
 export const registerPasskey     = (d) => req('POST', '/api/auth/passkey/register', d);
-export const loginPasskey        = (d) => req('POST', '/api/auth/passkey/login', d);
-export const getPasskeyStatus    = () => req('GET',  '/api/auth/passkey/status');
+export const loginPasskey        = (d) => req('POST', '/api/auth/passkey/login',    d);
+export const getPasskeyStatus    = ()  => req('GET',  '/api/auth/passkey/status');
 
 // Leave types
-export const getLeaveTypes   = () => req('GET', '/api/leave/types');
-export const addLeaveType    = (data) => req('POST', '/api/leave/types', data);
-export const updateLeaveType = (id, data) => req('PUT', `/api/leave/types/${id}`, data);
-export const deleteLeaveType = (id) => req('DELETE', `/api/leave/types/${id}`);
+export const getLeaveTypes   = ()        => req('GET',    '/api/leave/types');
+export const addLeaveType    = (data)    => req('POST',   '/api/leave/types',     data);
+export const updateLeaveType = (id, data)=> req('PUT',    `/api/leave/types/${id}`, data);
+export const deleteLeaveType = (id)      => req('DELETE', `/api/leave/types/${id}`);
 
 // Leave history
-export const getHistory  = () => req('GET', '/api/leave/history');
-export const applyLeave  = (d) => req('POST', '/api/leave/apply', d);
-export const cancelLeave = (id) => req('DELETE', `/api/leave/history/${id}`);
+export const getHistory  = ()    => req('GET',    '/api/leave/history');
+export const applyLeave  = (d)   => req('POST',   '/api/leave/apply',           d);
+export const cancelLeave = (id)  => req('DELETE', `/api/leave/history/${id}`);
 
 // Settings
-export const getSettings    = () => req('GET', '/api/settings');
+export const getSettings    = ()  => req('GET', '/api/settings');
 export const updateSettings = (d) => req('PUT', '/api/settings', d);
 
 // Recipients / Viber
-export const getRecipients   = () => req('GET', '/api/recipients');
-export const addRecipient    = (d) => req('POST', '/api/recipients', d);
-export const deleteRecipient = (id) => req('DELETE', `/api/recipients/${id}`);
+export const getRecipients   = ()    => req('GET',    '/api/recipients');
+export const addRecipient    = (d)   => req('POST',   '/api/recipients',      d);
+export const deleteRecipient = (id)  => req('DELETE', `/api/recipients/${id}`);
 export const getViberLinks   = (leaveHistoryId) => req('POST', '/api/viber/links', { leaveHistoryId });
