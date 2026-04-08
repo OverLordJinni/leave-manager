@@ -8,7 +8,7 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy     = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://leave-manager-9zdl.onrender.com; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'"
+    Content-Security-Policy     = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'"
     X-Frame-Options             = "DENY"
     X-Content-Type-Options      = "nosniff"
     Referrer-Policy             = "strict-origin-when-cross-origin"
@@ -25,7 +25,21 @@
   [headers.values]
     Cache-Control = "no-cache"
 
-# SPA routing — all paths serve index.html
+# Proxy /api/* to Render backend — makes cookies same-origin, fixes cross-origin cookie blocking
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://leave-manager-9zdl.onrender.com/api/:splat"
+  status = 200
+  force  = true
+
+# Proxy /health to Render backend
+[[redirects]]
+  from   = "/health"
+  to     = "https://leave-manager-9zdl.onrender.com/health"
+  status = 200
+  force  = true
+
+# SPA routing — all paths serve index.html (must be last)
 [[redirects]]
   from   = "/*"
   to     = "/index.html"
