@@ -21,13 +21,7 @@ jobs:
         run: cd frontend && npm run build
 
       - name: Deploy to Netlify
-        uses: nwtgck/actions-netlify@v3.0
-        with:
-          publish-dir: './frontend/dist'
-          production-branch: main
-          production-deploy: true
-          deploy-message: "Deploy from GitHub Actions — ${{ github.sha }}"
+        run: npx netlify-cli deploy --prod --dir=frontend/dist
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        timeout-minutes: 10
