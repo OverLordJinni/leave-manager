@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as api from './api.js';
 
-// ─── Utils ────────────────────────────────────────────────────────────────────
+// âââ Utils ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function weekdays(a, b) {
   let n = 0, c = new Date(a), e = new Date(b), g = 0;
   while (c <= e && g++ < 400) { const d = c.getDay(); if (d && d < 6) n++; c.setDate(c.getDate()+1); }
@@ -21,7 +21,7 @@ function fmt(s) {
 function uid() { return Math.random().toString(36).slice(2,9); }
 const today = () => new Date().toISOString().split('T')[0];
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
+// âââ Design tokens ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const C = {
   bg:'#F8F7F4', surface:'#FFFFFF', border:'#EDECE8', text:'#111111',
   muted:'#888888', faint:'#F2F1EE', accent:'#1A1A1A',
@@ -29,7 +29,7 @@ const C = {
 };
 const PALETTE = ['#2563EB','#16A34A','#DC2626','#D97706','#7C3AED','#0891B2','#DB2777','#059669','#9333EA'];
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
+// âââ Icons ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const Icon = ({ n, size=20, color='currentColor' }) => {
   const p = {
     home:    <><path d="M3 12L12 3l9 9"/><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></>,
@@ -59,7 +59,7 @@ const Icon = ({ n, size=20, color='currentColor' }) => {
   );
 };
 
-// ─── Primitives ───────────────────────────────────────────────────────────────
+// âââ Primitives âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const Field = ({ label, helper, children }) => (
   <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
     {label && <label style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em' }}>{label}</label>}
@@ -86,7 +86,7 @@ const SelInput = ({ label, helper, children, ...props }) => (
         fontSize:15, background:C.faint, outline:'none',
         fontFamily:"'DM Sans',sans-serif", color:C.text, appearance:'none', width:'100%',
       }}>{children}</select>
-      <span style={{ position:'absolute', right:14, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:C.muted, fontSize:12 }}>▾</span>
+      <span style={{ position:'absolute', right:14, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:C.muted, fontSize:12 }}>â¾</span>
     </div>
   </Field>
 );
@@ -108,7 +108,7 @@ const Btn = ({ children, variant='dark', full, sm, loading, style:sx, disabled, 
   return (
     <button style={{ ...base, ...v[variant], ...sx }}
       onClick={(disabled||loading)?undefined:onClick}>
-      {loading ? <span style={{ animation:'spin 0.7s linear infinite', display:'inline-block' }}>⟳</span> : children}
+      {loading ? <span style={{ animation:'spin 0.7s linear infinite', display:'inline-block' }}>â³</span> : children}
     </button>
   );
 };
@@ -158,7 +158,7 @@ const Sheet = ({ title, onClose, children }) => (
   </div>
 );
 
-const Spinner = ({ label='Loading…' }) => (
+const Spinner = ({ label='Loadingâ¦' }) => (
   <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
     gap:12, padding:'60px 20px', color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
     <div style={{ width:28, height:28, border:`3px solid ${C.border}`,
@@ -167,7 +167,7 @@ const Spinner = ({ label='Loading…' }) => (
   </div>
 );
 
-// ─── Ring ─────────────────────────────────────────────────────────────────────
+// âââ Ring âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function Ring({ total, used, color, name, size=88 }) {
   const rem = Math.max(0, total-used), pct = total>0?rem/total:1;
   const r = size/2-7, circ = 2*Math.PI*r;
@@ -192,86 +192,185 @@ function Ring({ total, used, color, name, size=88 }) {
   );
 }
 
-// ─── PIN / Login Screen ───────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
-  const [token, setToken]   = useState('');
-  const [show,  setShow]    = useState(false);
-  const [err,   setErr]     = useState('');
-  const [loading, setLoading] = useState(false);
-
-  async function submit() {
-    if (!token.trim()) return;
-    setLoading(true); setErr('');
-    try {
-      await api.login(token.trim());
-      onLogin();
-    } catch {
-      setErr('Invalid token. Please try again.');
-    } finally { setLoading(false); }
-  }
-
+// âââ PIN / Login Screen âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+function AuthScreen({ onLogin }) {
+  const [view, setView] = useState('login');
   return (
     <div style={{ minHeight:'100vh', background:C.bg, display:'flex', flexDirection:'column',
-      alignItems:'center', justifyContent:'center', padding:32, fontFamily:"'DM Sans',sans-serif" }}>
-      <div style={{ width:'100%', maxWidth:340, display:'flex', flexDirection:'column', gap:24 }}>
-        <div style={{ textAlign:'center' }}>
-          <div style={{ width:64, height:64, borderRadius:20, background:C.accent,
-            display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px' }}>
-            <Icon n="lock" size={28} color="#fff"/>
-          </div>
-          <h1 style={{ fontSize:24, fontWeight:700, color:C.text, fontFamily:"'Fraunces',serif", margin:'0 0 8px' }}>
-            Leave Manager
-          </h1>
-          <p style={{ fontSize:14, color:C.muted, lineHeight:1.6 }}>
-            Enter your access token to continue.
-          </p>
-        </div>
-
-        <Field label="Access Token">
-          <div style={{ position:'relative' }}>
-            <input
-              type={show ? 'text' : 'password'}
-              value={token}
-              onChange={e => setToken(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && submit()}
-              placeholder="Paste your token here"
-              autoComplete="current-password"
-              style={{ border:`1.5px solid ${err?C.red:C.border}`, borderRadius:10, padding:'11px 44px 11px 14px',
-                fontSize:15, background:C.faint, outline:'none', width:'100%',
-                fontFamily:"'DM Sans',sans-serif", color:C.text }}
-            />
-            <button onClick={() => setShow(s=>!s)} style={{ position:'absolute', right:12, top:'50%',
-              transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', padding:4 }}>
-              <Icon n={show?'eyeoff':'eye'} size={16} color={C.muted}/>
-            </button>
-          </div>
-          {err && <p style={{ fontSize:12, color:C.red, marginTop:4 }}>{err}</p>}
-        </Field>
-
-        <Btn full onClick={submit} loading={loading} style={{ borderRadius:14, padding:16, fontSize:16 }}>
-          Unlock <Icon n="arrow" size={16} color="#fff"/>
-        </Btn>
-
-        <p style={{ fontSize:11, color:C.muted, textAlign:'center', lineHeight:1.6 }}>
-          Token is set by the server admin.<br/>It is never stored in this browser.
-        </p>
-      </div>
+      alignItems:'center', justifyContent:'center', padding:'32px 20px',
+      fontFamily:"'DM Sans',sans-serif" }}>
+      {view === 'login'  && <LoginForm  onLogin={onLogin} onSwitch={setView}/>}
+      {view === 'signup' && <SignupForm onLogin={onLogin} onSwitch={setView}/>}
+      {view === 'forgot' && <ForgotForm onSwitch={setView}/>}
     </div>
   );
 }
 
-// ─── Onboarding ───────────────────────────────────────────────────────────────
+function AuthCard({ subtitle, children }) {
+  return (
+    <div style={{ width:'100%', maxWidth:360, display:'flex', flexDirection:'column', gap:20 }}>
+      <div style={{ textAlign:'center' }}>
+        <div style={{ width:56, height:56, borderRadius:16, background:C.accent,
+          display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 14px' }}>
+          <Icon n="lock" size={24} color="#fff"/>
+        </div>
+        <h1 style={{ fontSize:22, fontWeight:700, color:C.text,
+          fontFamily:"'Fraunces',serif", margin:'0 0 5px' }}>Leave Manager</h1>
+        <p style={{ fontSize:13, color:C.muted, margin:0 }}>{subtitle}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function AuthInput({ label, type='text', value, onChange, placeholder, autoComplete, error }) {
+  const [show, setShow] = useState(false);
+  const isPw = type === 'password';
+  return (
+    <Field label={label}>
+      <div style={{ position:'relative' }}>
+        <input type={isPw && show ? 'text' : type} value={value} onChange={onChange}
+          placeholder={placeholder} autoComplete={autoComplete}
+          style={{ border:`1.5px solid ${error?C.red:C.border}`, borderRadius:10,
+            padding: isPw ? '12px 44px 12px 14px' : '12px 14px',
+            fontSize:15, background:C.faint, outline:'none', width:'100%',
+            fontFamily:"'DM Sans',sans-serif", color:C.text, boxSizing:'border-box' }}/>
+        {isPw && (
+          <button type="button" onClick={()=>setShow(s=>!s)}
+            style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)',
+              background:'none', border:'none', cursor:'pointer', padding:4 }}>
+            <Icon n={show?'eyeoff':'eye'} size={16} color={C.muted}/>
+          </button>
+        )}
+      </div>
+      {error && <p style={{ fontSize:12, color:C.red, margin:'4px 0 0' }}>{error}</p>}
+    </Field>
+  );
+}
+
+function LoginForm({ onLogin, onSwitch }) {
+  const [email, setEmail]     = useState('');
+  const [pw, setPw]           = useState('');
+  const [err, setErr]         = useState('');
+  const [loading, setLoading] = useState(false);
+  async function submit(e) {
+    e?.preventDefault?.();
+    if (!email.trim() || !pw) { setErr('Email and password are required.'); return; }
+    setLoading(true); setErr('');
+    try { await api.login(email.trim(), pw); onLogin(); }
+    catch { setErr('Invalid email or password.'); }
+    finally { setLoading(false); }
+  }
+  return (
+    <AuthCard subtitle="Sign in to your account">
+      <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <AuthInput label="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)}
+          placeholder="your@email.com" autoComplete="email"/>
+        <AuthInput label="Password" type="password" value={pw} onChange={e=>setPw(e.target.value)}
+          placeholder="Your password" autoComplete="current-password" error={err}/>
+        <Btn full onClick={submit} loading={loading} style={{ borderRadius:14, padding:15, fontSize:16, marginTop:2 }}>
+          Sign In <Icon n="arrow" size={16} color="#fff"/>
+        </Btn>
+      </form>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
+        <button onClick={()=>onSwitch('forgot')} style={{ background:'none', border:'none', fontSize:13, color:C.muted, cursor:'pointer' }}>Forgot password?</button>
+        <p style={{ fontSize:13, color:C.muted, margin:0 }}>No account?{' '}
+          <span style={{ color:C.accent, fontWeight:600, cursor:'pointer' }} onClick={()=>onSwitch('signup')}>Sign up</span>
+        </p>
+      </div>
+    </AuthCard>
+  );
+}
+
+function SignupForm({ onLogin, onSwitch }) {
+  const [name, setName]       = useState('');
+  const [email, setEmail]     = useState('');
+  const [pw, setPw]           = useState('');
+  const [pw2, setPw2]         = useState('');
+  const [err, setErr]         = useState('');
+  const [loading, setLoading] = useState(false);
+  async function submit(e) {
+    e?.preventDefault?.(); setErr('');
+    if (!email.trim() || !pw) { setErr('Email and password are required.'); return; }
+    if (pw.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+    if (pw !== pw2) { setErr('Passwords do not match.'); return; }
+    setLoading(true);
+    try {
+      await api.signup(email.trim(), pw, name.trim());
+      await api.login(email.trim(), pw);
+      onLogin();
+    } catch(e) {
+      setErr(e.message?.includes('already exists') ? 'An account with this email already exists.' : (e.message || 'Signup failed.'));
+    } finally { setLoading(false); }
+  }
+  return (
+    <AuthCard subtitle="Create your account">
+      <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <AuthInput label="Name (optional)" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name"/>
+        <AuthInput label="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com" autoComplete="email"/>
+        <AuthInput label="Password" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password"/>
+        <AuthInput label="Confirm Password" type="password" value={pw2} onChange={e=>setPw2(e.target.value)} placeholder="Repeat password" autoComplete="new-password" error={err}/>
+        <Btn full onClick={submit} loading={loading} style={{ borderRadius:14, padding:15, fontSize:16, marginTop:2 }}>
+          Create Account <Icon n="arrow" size={16} color="#fff"/>
+        </Btn>
+      </form>
+      <p style={{ fontSize:13, color:C.muted, textAlign:'center', margin:0 }}>
+        Already have an account?{' '}
+        <span style={{ color:C.accent, fontWeight:600, cursor:'pointer' }} onClick={()=>onSwitch('login')}>Sign in</span>
+      </p>
+    </AuthCard>
+  );
+}
+
+function ForgotForm({ onSwitch }) {
+  const [email, setEmail]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent]       = useState(false);
+  async function submit(e) {
+    e?.preventDefault?.();
+    if (!email.trim()) return;
+    setLoading(true);
+    try { await api.forgotPassword(email.trim()); } catch {}
+    finally { setSent(true); setLoading(false); }
+  }
+  return (
+    <AuthCard subtitle="Reset your password">
+      {sent ? (
+        <div style={{ textAlign:'center', padding:'16px 0' }}>
+          <div style={{ fontSize:40, marginBottom:12 }}>📧</div>
+          <p style={{ color:C.text, fontWeight:600, margin:'0 0 8px' }}>Check your email</p>
+          <p style={{ color:C.muted, fontSize:13, lineHeight:1.6 }}>If an account exists for {email}, a reset link has been sent.</p>
+          <button onClick={()=>onSwitch('login')} style={{ marginTop:16, background:'none', border:'none', color:C.accent, fontWeight:600, fontSize:14, cursor:'pointer' }}>Back to Sign In</button>
+        </div>
+      ) : (
+        <>
+          <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <AuthInput label="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com" autoComplete="email"/>
+            <Btn full onClick={submit} loading={loading} style={{ borderRadius:14, padding:15, fontSize:16 }}>Send Reset Link</Btn>
+          </form>
+          <p style={{ fontSize:13, color:C.muted, textAlign:'center', margin:0 }}>
+            <span style={{ color:C.accent, fontWeight:600, cursor:'pointer' }} onClick={()=>onSwitch('login')}>Back to Sign In</span>
+          </p>
+        </>
+      )}
+    </AuthCard>
+  );
+}
+
+function LoginScreen({ onLogin }) {
+  return <AuthScreen onLogin={onLogin}/>;
+}
 function Onboarding({ onDone }) {
   const [step, setStep]   = useState(0);
   const [date, setDate]   = useState('');
   const [saving, setSave] = useState(false);
 
   const slides = [
-    { emoji:'🗓️', title:'Track your leave,\nstay in control.',
+    { emoji:'ðï¸', title:'Track your leave,\nstay in control.',
       body:'Manage all your leave balances in one place. Know exactly how many days you have left.' },
-    { emoji:'📲', title:'Notify via Viber,\ninstantly.',
+    { emoji:'ð²', title:'Notify via Viber,\ninstantly.',
       body:'After applying for leave, the app opens Viber with a pre-filled message. One tap to send.' },
-    { emoji:'🔄', title:'Auto-resets on\ncontract renewal.',
+    { emoji:'ð', title:'Auto-resets on\ncontract renewal.',
       body:'Set your contract renewal date once. Every year, all balances reset automatically.' },
   ];
 
@@ -295,7 +394,7 @@ function Onboarding({ onDone }) {
             {step<2?'Continue':'Set up my app'} <Icon n="arrow" size={16} color="#fff"/>
           </Btn>
           {step>0 && <button onClick={() => setStep(s=>s-1)} style={{ background:'none', border:'none',
-            color:C.muted, fontSize:13, cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>← Back</button>}
+            color:C.muted, fontSize:13, cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>â Back</button>}
         </div>
       </div>
     );
@@ -306,7 +405,7 @@ function Onboarding({ onDone }) {
       alignItems:'center', justifyContent:'center', padding:32, fontFamily:"'DM Sans',sans-serif" }}>
       <div style={{ width:'100%', maxWidth:340, display:'flex', flexDirection:'column', gap:22 }}>
         <div style={{ textAlign:'center' }}>
-          <span style={{ fontSize:52 }}>📋</span>
+          <span style={{ fontSize:52 }}>ð</span>
           <h1 style={{ fontSize:22, fontWeight:700, color:C.text, fontFamily:"'Fraunces',serif", margin:'12px 0 8px' }}>
             When does your contract renew?
           </h1>
@@ -326,7 +425,7 @@ function Onboarding({ onDone }) {
   );
 }
 
-// ─── Home ──────────────────────────────────────────────────────────────────────
+// âââ Home ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismissReset }) {
   const renewal   = daysTo(settings.contractRenewal);
   const totalUsed = leaveTypes.reduce((a,l) => a+l.used, 0);
@@ -337,11 +436,11 @@ function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismi
       {justReset && (
         <div style={{ background:'#F0FDF4', borderRadius:16, padding:'14px 16px',
           border:'1.5px solid #86EFAC', display:'flex', gap:12, alignItems:'flex-start' }}>
-          <span style={{ fontSize:22, flexShrink:0 }}>🎉</span>
+          <span style={{ fontSize:22, flexShrink:0 }}>ð</span>
           <div style={{ flex:1 }}>
             <p style={{ fontWeight:700, color:'#15803D', fontSize:14, marginBottom:3 }}>Leave Balance Reset!</p>
             <p style={{ fontSize:12, color:'#166534', lineHeight:1.55 }}>
-              Contract renewed — all balances back to full.
+              Contract renewed â all balances back to full.
               {settings.contractRenewal && ` Next reset: ${fmt(settings.contractRenewal)}.`}
             </p>
           </div>
@@ -362,7 +461,7 @@ function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismi
             <p style={{ fontSize:11, color:C.muted, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3 }}>Balance resets on</p>
             <p style={{ fontSize:15, fontWeight:700, color:urgent?C.orange:C.text }}>{fmt(settings.contractRenewal)}</p>
             <p style={{ fontSize:12, color:urgent?C.orange:C.muted, marginTop:2 }}>
-              {renewal===null?'':renewal>0?`${renewal} days away`:renewal===0?'Resets today 🎉':`${Math.abs(renewal)} days overdue`}
+              {renewal===null?'':renewal>0?`${renewal} days away`:renewal===0?'Resets today ð':`${Math.abs(renewal)} days overdue`}
             </p>
           </div>
         </div>
@@ -371,7 +470,7 @@ function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismi
           border:`1.5px dashed ${C.border}`, display:'flex', alignItems:'center', gap:10 }}>
           <Icon n="info" size={17} color={C.muted}/>
           <p style={{ fontSize:13, color:C.muted, lineHeight:1.5 }}>
-            Set a renewal date in <strong>Settings → Contract</strong> to enable auto-reset.
+            Set a renewal date in <strong>Settings â Contract</strong> to enable auto-reset.
           </p>
         </div>
       )}
@@ -403,7 +502,7 @@ function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismi
   );
 }
 
-// ─── History Row ──────────────────────────────────────────────────────────────
+// âââ History Row ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function HistoryRow({ item, onDelete }) {
   const color = item.typeColor || item.type_color;
   const name  = item.typeName  || item.type_name;
@@ -421,7 +520,7 @@ function HistoryRow({ item, onDelete }) {
           <span style={{ fontWeight:700, fontSize:14, color:C.text }}>{name}</span>
           <Pill color={color} label={`${item.days}d`}/>
         </div>
-        <p style={{ fontSize:12, color:C.muted }}>{fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''}</p>
+        <p style={{ fontSize:12, color:C.muted }}>{fmt(sd)}{sd!==ed?` â ${fmt(ed)}`:''}</p>
         {item.reason && <p style={{ fontSize:11, color:'#aaa', marginTop:2, fontStyle:'italic',
           overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>"{item.reason}"</p>}
       </div>
@@ -435,7 +534,7 @@ function HistoryRow({ item, onDelete }) {
   );
 }
 
-// ─── Apply Form ───────────────────────────────────────────────────────────────
+// âââ Apply Form âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
   const t = today();
   const [form, setForm]   = useState({ typeId:leaveTypes[0]?.id||'', start:t, end:t, reason:'' });
@@ -466,7 +565,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
 
   if (leaveTypes.length === 0) return (
     <p style={{ textAlign:'center', color:C.muted, fontSize:14, lineHeight:1.7, padding:'20px 0' }}>
-      No leave types configured.<br/>Go to <strong>Settings → Leave Types</strong>.
+      No leave types configured.<br/>Go to <strong>Settings â Leave Types</strong>.
     </p>
   );
 
@@ -480,7 +579,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
           <div>
             <p style={{ fontWeight:700, color:'#15803D', fontSize:14 }}>Leave Submitted!</p>
             <p style={{ color:'#166534', fontSize:12, marginTop:2 }}>
-              {entry.typeName||entry.type_name} · {entry.days} day{entry.days>1?'s':''} · {fmt(sd)}{sd!==ed?` – ${fmt(ed)}`:''}
+              {entry.typeName||entry.type_name} Â· {entry.days} day{entry.days>1?'s':''} Â· {fmt(sd)}{sd!==ed?` â ${fmt(ed)}`:''}
             </p>
           </div>
         </div>
@@ -504,7 +603,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
                     <p style={{ fontWeight:700, color:C.viber, fontSize:14 }}>{lk.recipientName}</p>
                     <p style={{ fontSize:12, color:'#888' }}>{lk.phone}</p>
                   </div>
-                  <span style={{ fontSize:13, fontWeight:700, color:C.viber }}>Open →</span>
+                  <span style={{ fontSize:13, fontWeight:700, color:C.viber }}>Open â</span>
                 </div>
               </a>
             ))}
@@ -513,7 +612,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
           <div style={{ background:C.faint, borderRadius:12, padding:'13px 16px',
             border:`1.5px dashed ${C.border}`, textAlign:'center' }}>
             <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
-              No Viber recipients yet.<br/>Add them in <strong>Settings → Viber</strong>.
+              No Viber recipients yet.<br/>Add them in <strong>Settings â Viber</strong>.
             </p>
           </div>
         )}
@@ -525,7 +624,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       <SelInput label="Leave Type" value={form.typeId} onChange={e=>set('typeId',e.target.value)}>
-        {leaveTypes.map(l => <option key={l.id} value={l.id}>{l.name} — {l.total-l.used} day{l.total-l.used!==1?'s':''} remaining</option>)}
+        {leaveTypes.map(l => <option key={l.id} value={l.id}>{l.name} â {l.total-l.used} day{l.total-l.used!==1?'s':''} remaining</option>)}
       </SelInput>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
         <TInput label="Start Date" type="date" value={form.start} min={t}
@@ -541,7 +640,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
         </div>
       )}
       <TInput label="Reason (optional)" type="text" value={form.reason}
-        placeholder="e.g. Family vacation, medical…" onChange={e=>set('reason',e.target.value)}/>
+        placeholder="e.g. Family vacation, medicalâ¦" onChange={e=>set('reason',e.target.value)}/>
       <Btn full onClick={submit} disabled={days<=0||over} loading={sub}
         style={{ marginTop:4, padding:16, fontSize:16, borderRadius:14 }}>
         Submit Leave
@@ -550,14 +649,14 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess }) {
   );
 }
 
-// ─── History Screen ───────────────────────────────────────────────────────────
+// âââ History Screen âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
   const [filter, setFilter]   = useState('all');
   const [deleting, setDel]    = useState(null);
 
   async function cancel(id) {
     setDel(id);
-    try { await api.cancelLeave(id); toast('Leave cancelled — balance restored.'); onRefresh(); }
+    try { await api.cancelLeave(id); toast('Leave cancelled â balance restored.'); onRefresh(); }
     catch (err) { toast(err.message, 'error'); }
     finally { setDel(null); }
   }
@@ -604,7 +703,7 @@ function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
         </div>
       )}
 
-      <p style={{ fontSize:12, color:C.muted }}>Tap 🗑 to cancel a leave and restore the balance.</p>
+      <p style={{ fontSize:12, color:C.muted }}>Tap ð to cancel a leave and restore the balance.</p>
       {filtered.length===0
         ? <p style={{ textAlign:'center', color:C.muted, fontSize:13, padding:'20px 0' }}>No entries for this type.</p>
         : filtered.map(h => <HistoryRow key={h.id} item={h} onDelete={deleting===h.id?null:cancel}/>)
@@ -613,13 +712,37 @@ function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
   );
 }
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsModal({ leaveTypes, recipients, settings, onClose, onRefresh, toast }) {
+// âââ Settings âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+function AccountTab({ onClose, onLogout, toast }) {
+  const [loading, setLoading] = useState(false);
+  async function handleLogout() {
+    setLoading(true);
+    try { await api.logout(); onLogout(); onClose(); }
+    catch { toast('Sign out failed', 'error'); }
+    finally { setLoading(false); }
+  }
+  return (
+    <div style={{ paddingBottom:16 }}>
+      <p style={{ fontSize:13, color:C.muted, lineHeight:1.6, margin:'0 0 20px' }}>
+        You are signed in. Sessions last 30 days across all your devices.
+      </p>
+      <Btn full variant="danger" onClick={handleLogout} loading={loading}
+        style={{ borderRadius:14, padding:14, fontSize:15 }}>
+        Sign Out
+      </Btn>
+      <p style={{ fontSize:11, color:C.muted, textAlign:'center', marginTop:8, lineHeight:1.5 }}>
+        Signs you out of this device only.
+      </p>
+    </div>
+  );
+}
+
+function SettingsModal({ leaveTypes, recipients, settings, onClose, onRefresh, onLogout, toast }) {
   const [tab, setTab] = useState('leaves');
   return (
     <Sheet title="Settings" onClose={onClose}>
       <div style={{ display:'flex', background:C.faint, borderRadius:13, padding:4, marginBottom:22, gap:3 }}>
-        {[['leaves','🌿','Leaves'],['recipients','📲','Viber'],['contract','📋','Contract']].map(([id,em,label]) => (
+        {[['leaves','ð¿','Leaves'],['recipients','ð²','Viber'],['contract','ð','Contract']].map(([id,em,label]) => (
           <button key={id} onClick={()=>setTab(id)} style={{ flex:1, padding:'9px 4px', border:'none', borderRadius:11,
             fontWeight:600, fontSize:12, cursor:'pointer', fontFamily:"'DM Sans',sans-serif",
             background:tab===id?C.surface:'transparent', color:tab===id?C.text:C.muted,
@@ -631,6 +754,8 @@ function SettingsModal({ leaveTypes, recipients, settings, onClose, onRefresh, t
       {tab==='leaves'     && <LeaveTypesTab  leaveTypes={leaveTypes} onRefresh={onRefresh} toast={toast}/>}
       {tab==='recipients' && <RecipientsTab  recipients={recipients} onRefresh={onRefresh} toast={toast}/>}
       {tab==='contract'   && <ContractTab    settings={settings}    onRefresh={onRefresh} toast={toast}/>}
+      {tab==='account'    && <AccountTab onClose={onClose} onLogout={onLogout} toast={toast}/>}
+      {tab==='account'    && <AccountTab onClose={onClose} onLogout={onLogout} toast={toast}/>}
     </Sheet>
   );
 }
@@ -700,7 +825,7 @@ function LeaveTypesTab({ leaveTypes, onRefresh, toast }) {
       ))}
       {adding ? (
         <div style={{ background:'#F0F9FF',borderRadius:13,padding:14,border:'1.5px solid #BAE6FD',display:'flex',flexDirection:'column',gap:12 }}>
-          <TInput label="Leave Type Name" value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Study Leave, Maternity…"/>
+          <TInput label="Leave Type Name" value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Study Leave, Maternityâ¦"/>
           <TInput label="Total Days / Year" type="number" min="1" value={form.total} onChange={e=>setForm(p=>({...p,total:e.target.value}))}/>
           <div>
             <p style={{ fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8 }}>Color</p>
@@ -741,7 +866,7 @@ function RecipientsTab({ recipients, onRefresh, toast }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
       <div style={{ background:'#F5F3FF',borderRadius:12,padding:'12px 14px',border:'1.5px solid #DDD6FE' }}>
-        <p style={{ fontSize:12,color:'#6D28D9',lineHeight:1.65 }}>📲 After applying for leave, the app opens Viber with a pre-filled message. One tap to send.</p>
+        <p style={{ fontSize:12,color:'#6D28D9',lineHeight:1.65 }}>ð² After applying for leave, the app opens Viber with a pre-filled message. One tap to send.</p>
       </div>
       {recipients.length===0&&!adding&&<p style={{ fontSize:13,color:C.muted,textAlign:'center',padding:'10px 0' }}>No contacts yet. Add your manager or HR.</p>}
       {recipients.map(r=>(
@@ -787,14 +912,14 @@ function ContractTab({ settings, onRefresh, toast }) {
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
       <div style={{ background:'#F0F9FF',borderRadius:12,padding:'13px 14px',border:'1.5px solid #BAE6FD' }}>
         <p style={{ fontSize:13,color:'#0369A1',lineHeight:1.65 }}>
-          <strong>🔄 Auto-reset:</strong> On the renewal date, all leave balances reset to their full amounts and the date automatically advances by 1 year.
+          <strong>ð Auto-reset:</strong> On the renewal date, all leave balances reset to their full amounts and the date automatically advances by 1 year.
         </p>
       </div>
       <TInput label="Next Renewal Date" type="date" value={date} onChange={e=>setDate(e.target.value)}/>
       {date&&days!==null&&(
         <div style={{ borderRadius:11,padding:'11px 14px',background:days<=30?'#FFF7ED':'#F0FDF4',border:`1.5px solid ${days<=30?'#FED7AA':'#BBF7D0'}` }}>
           <p style={{ fontSize:13,fontWeight:700,color:days<=30?C.orange:C.green }}>
-            {days>0?`${days} days until balance reset`:days===0?'🎉 Reset happens today!':`${Math.abs(days)} days overdue`}
+            {days>0?`${days} days until balance reset`:days===0?'ð Reset happens today!':`${Math.abs(days)} days overdue`}
           </p>
         </div>
       )}
@@ -805,15 +930,20 @@ function ContractTab({ settings, onRefresh, toast }) {
         </div>
       )}
       <Btn full onClick={save} disabled={saved} loading={saving} style={{ marginTop:4 }}>
-        {saved?'✓ Saved':'Save Renewal Date'}
+        {saved?'â Saved':'Save Renewal Date'}
       </Btn>
     </div>
   );
 }
 
-// ─── Root ─────────────────────────────────────────────────────────────────────
+// âââ Root âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 export default function App() {
-  const [authed,     setAuthed]     = useState(false);
+  const [authed,    setAuthed]    = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    api.restoreSession().then(ok => { if (ok) setAuthed(true); }).finally(() => setAuthReady(true));
+  }, []);
   const [leaveTypes, setLeaveTypes] = useState([]);
   const [history,    setHistory]    = useState([]);
   const [recipients, setRecipients] = useState([]);
@@ -870,16 +1000,27 @@ export default function App() {
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center',
       height:'100vh', background:C.bg }}>
-      <Spinner label="Loading…"/>
+      <Spinner label="Loadingâ¦"/>
     </div>
   );
 
+
+  async function onLogout() {
+    setAuthed(false);
+  }
+  async function onLogout() { setAuthed(false); }
+
+  if (!authReady) return (
+    <div style={{ minHeight:'100vh', background:C.bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <Spinner label="Loading…"/>
+    </div>
+  );
   if (!authed) return <LoginScreen onLogin={onLogin}/>;
 
   if (error) return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
       height:'100vh', background:C.bg, fontFamily:"'DM Sans',sans-serif", padding:32, textAlign:'center', gap:16 }}>
-      <span style={{ fontSize:48 }}>⚠️</span>
+      <span style={{ fontSize:48 }}>â ï¸</span>
       <h2 style={{ fontSize:18, fontWeight:700, color:C.text, fontFamily:"'Fraunces',serif" }}>Connection error</h2>
       <p style={{ fontSize:13, color:C.muted, lineHeight:1.7, maxWidth:300 }}>
         Cannot reach the backend. Check your <code>VITE_API_URL</code> setting.
