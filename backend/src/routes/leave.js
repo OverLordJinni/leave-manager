@@ -25,19 +25,30 @@ function dbErr(res, req, err) {
 
 // ── Contract renewal reset ────────────────────────────────────────────────────
 async function checkAndApplyReset() {
-  const { data } = await supabase.from('settings').select('value').eq('key', 'contractRenewal').single();
-  const renewalDate = data?.value;
+  // Read both contractRenewal and lastResetDate together
+  const { data: rows } = await supabase
+    .from('settings')
+    .select('key, value')
+    .in('key', ['contractRenewal', 'lastResetDate']);
+
+  const byKey      = Object.fromEntries((rows || []).map(r => [r.key, r.value]));
+  const renewalDate = byKey.contractRenewal;
+  const lastReset   = byKey.lastResetDate;
   if (!renewalDate || !isDate(renewalDate)) return { reset: false };
 
   const today = new Date(); today.setHours(0,0,0,0);
   const due   = new Date(renewalDate); due.setHours(0,0,0,0);
   if (today < due) return { reset: false };
 
+  // Guard against double-reset: if lastResetDate already equals renewalDate, skip
+  if (lastReset === renewalDate) return { reset: false };
+
   const next = addOneYear(renewalDate);
+  // Write lastResetDate first so concurrent requests see the guard immediately
+  await supabase.from('settings').upsert({ key: 'lastResetDate', value: renewalDate }, { onConflict: 'key' });
   await Promise.all([
     supabase.from('leave_types').update({ used: 0 }).neq('id', '00000000-0000-0000-0000-000000000000'),
-    supabase.from('settings').upsert({ key: 'contractRenewal', value: next },  { onConflict: 'key' }),
-    supabase.from('settings').upsert({ key: 'lastResetDate',   value: renewalDate }, { onConflict: 'key' }),
+    supabase.from('settings').upsert({ key: 'contractRenewal', value: next }, { onConflict: 'key' }),
   ]);
   console.log(JSON.stringify({ event: 'leave_reset', next }));
   return { reset: true };
