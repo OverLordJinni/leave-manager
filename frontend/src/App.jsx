@@ -122,8 +122,11 @@ const Icon = ({ n, size=20, color='currentColor' }) => {
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Cal+Sans:wght@600&display=swap');
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html{-webkit-text-size-adjust:100%;}
   body{overscroll-behavior:none;-webkit-font-smoothing:antialiased;}
   input,select,button,textarea{font-family:'Inter',sans-serif;}
+  button,a{touch-action:manipulation;}
+  button{-webkit-user-select:none;user-select:none;}
   input[type=date]::-webkit-calendar-picker-indicator{opacity:.5;cursor:pointer;filter:var(--cal-filter,none);}
   ::-webkit-scrollbar{width:3px;}
   ::-webkit-scrollbar-thumb{background:rgba(128,128,180,0.25);border-radius:3px;}
@@ -223,7 +226,7 @@ const TInput = ({ label, helper, style:sx, ...props }) => {
         style={{
           border: `1.5px solid ${focused ? C.accent : C.border}`,
           borderRadius: 12, padding: '12px 14px',
-          fontSize: 15, background: C.faint, outline: 'none',
+          fontSize: 16, background: C.faint, outline: 'none',
           fontFamily: "'Inter',sans-serif", color: C.text,
           transition: 'border-color .2s, box-shadow .2s',
           boxShadow: focused ? `0 0 0 3px ${C.accentSoft}` : 'none',
@@ -240,7 +243,7 @@ const SelInput = ({ label, helper, children, ...props }) => {
       <div style={{ position:'relative' }}>
         <select {...props} style={{
           border:`1.5px solid ${C.border}`, borderRadius:12, padding:'12px 40px 12px 14px',
-          fontSize:15, background:C.faint, outline:'none',
+          fontSize:16, background:C.faint, outline:'none',
           fontFamily:"'Inter',sans-serif", color:C.text, appearance:'none', width:'100%',
           transition:'border-color .2s',
         }}>{children}</select>
@@ -264,7 +267,7 @@ const Toast = ({ msg, type='success', onDone }) => {
   const isErr = type === 'error';
   return (
     <div style={{
-      position:'fixed', top:60, left:'50%',
+      position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 60px)', left:'50%',
       transform:'translateX(-50%)',
       background: isErr ? C.redSoft : C.greenSoft,
       border:`1.5px solid ${isErr ? C.red : C.green}40`,
@@ -298,7 +301,8 @@ const Sheet = ({ title, onClose, children }) => {
         borderRadius:'24px 24px 0 0',
         width:'100%', maxWidth:480,
         maxHeight:'92vh', overflowY:'auto',
-        paddingBottom:40,
+        WebkitOverflowScrolling:'touch',
+        paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 40px)',
         boxShadow: C.shadowLg,
         animation:'slideUp .3s cubic-bezier(.32,.72,0,1)',
         border:`1px solid ${C.border}`,
@@ -825,7 +829,6 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast }) {
         const { links:vl } = await api.getViberLinks(newEntry.id);
         setLinks(vl);
       } else { setLinks([]); }
-      onSuccess();
     } catch(err) { toast?.(err.message, 'error'); }
     finally { setSub(false); }
   }
@@ -879,7 +882,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast }) {
             <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>No Viber recipients yet.<br/>Add them in <strong>Settings → Viber</strong>.</p>
           </Card>
         )}
-        <Btn full variant="ghost" onClick={onClose} style={{ marginTop:4 }}>Done</Btn>
+        <Btn full variant="ghost" onClick={onSuccess} style={{ marginTop:4 }}>Done</Btn>
       </div>
     );
   }
@@ -1308,6 +1311,11 @@ export default function App() {
   function showToast(msg, type='success') { setToast({ msg, type, key:uid() }); }
 
   useEffect(() => {
+    const el = document.querySelector('meta[name="theme-color"]');
+    if (el) el.setAttribute('content', dark ? '#0A0A12' : '#F0F0F5');
+  }, [dark]);
+
+  useEffect(() => {
     const h = () => { setAuthed(false); setLoading(false); };
     window.addEventListener('auth:required', h);
     return () => window.removeEventListener('auth:required', h);
@@ -1385,7 +1393,7 @@ export default function App() {
       <div style={{ maxWidth:480, margin:'0 auto', minHeight:'100vh', background:C.bg, fontFamily:"'Inter',sans-serif", position:'relative' }}>
 
         {/* Header */}
-        <div style={{ padding:'56px 20px 0', position:'sticky', top:0, zIndex:100, background:`${C.bg}ee`, backdropFilter:'blur(20px)', borderBottom:`1px solid ${C.border}20` }}>
+        <div style={{ padding:'calc(env(safe-area-inset-top, 44px) + 14px) 20px 0', position:'sticky', top:0, zIndex:100, background:`${C.bg}ee`, backdropFilter:'blur(20px)', borderBottom:`1px solid ${C.border}20` }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', paddingBottom:16 }}>
             <div>
               <p style={{ fontSize:12, color:C.muted, fontWeight:600, letterSpacing:'0.04em', marginBottom:4 }}>
@@ -1409,7 +1417,7 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <div style={{ padding:'20px 20px 110px', animation:'fadeIn .3s ease' }}>
+        <div style={{ padding:'20px 20px calc(env(safe-area-inset-bottom, 0px) + 90px)', animation:'fadeIn .3s ease' }}>
           {tab==='home'    && <HomeScreen leaveTypes={leaveTypes} settings={settings} history={history} onApply={()=>setApplyOpen(true)} justReset={justReset} onDismissReset={()=>setJustReset(false)}/>}
           {tab==='apply'   && <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setTab('home')} onSuccess={()=>{loadAll();setTab('home');}} toast={showToast}/>}
           {tab==='history' && <HistoryScreen leaveTypes={leaveTypes} history={history} onRefresh={loadAll} toast={showToast}/>}
@@ -1422,7 +1430,7 @@ export default function App() {
           background:C.navBg,
           borderTop:`1px solid ${C.border}`,
           backdropFilter:'blur(20px)',
-          display:'flex', padding:'10px 0 28px',
+          display:'flex', padding:'10px 0 calc(env(safe-area-inset-bottom, 0px) + 10px)',
           boxShadow:`0 -8px 30px rgba(0,0,0,${dark?.15:.08})`,
           zIndex:200,
         }}>
@@ -1452,7 +1460,7 @@ export default function App() {
 
         {/* Apply Sheet */}
         {applyOpen && (
-          <Sheet title="Apply for Leave" onClose={()=>setApplyOpen(false)}>
+          <Sheet title="Apply for Leave" onClose={()=>{loadAll();setApplyOpen(false);}}>
             <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setApplyOpen(false)} onSuccess={()=>{loadAll();setApplyOpen(false);showToast('Leave submitted!');}} toast={showToast}/>
           </Sheet>
         )}
