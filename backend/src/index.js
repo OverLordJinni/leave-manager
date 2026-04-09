@@ -24,6 +24,10 @@ const isProd = process.env.NODE_ENV === 'production';
 const FRONTEND_URL = process.env.FRONTEND_URL;
 if (isProd && !FRONTEND_URL) { console.error('FATAL: FRONTEND_URL must be set.'); process.exit(1); }
 
+// Trust Render + Netlify proxy layers so rate-limiters use the real client IP
+// (without this, every request looks like it comes from Netlify's proxy IP)
+app.set('trust proxy', true);
+
 // HTTP → HTTPS redirect in production
 app.use((req, res, next) => {
   if (isProd && req.headers['x-forwarded-proto'] === 'http')
@@ -61,7 +65,7 @@ app.use(cookieParser());
 
 // ── Rate limiters ─────────────────────────────────────────────────────────────
 const apiLimiter    = rateLimit({ windowMs: 60_000,      max: 60,  standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests.' } });
-const authLimiter   = rateLimit({ windowMs: 15 * 60_000, max: 10,  message: { error: 'Too many login attempts.' } });
+const authLimiter   = rateLimit({ windowMs: 15 * 60_000, max: 20,  message: { error: 'Too many login attempts. Please wait 15 minutes.' } });
 const healthLimiter = rateLimit({ windowMs: 60_000,      max: 10 });
 
 // ── Public routes ─────────────────────────────────────────────────────────────
