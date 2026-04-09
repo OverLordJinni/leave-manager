@@ -86,25 +86,36 @@ async function handleSignup(req, res) {
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 async function handleLogin(req, res) {
-  const { email, password } = req.body || {};
-  if (!email || !password)
-    return res.status(400).json({ error: 'Email and password are required' });
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password)
+      return res.status(400).json({ error: 'Email and password are required' });
 
-  const emailClean = email.toLowerCase().trim();
-  const { data: user } = await supabase
-    .from('users').select('id, password_hash').eq('email', emailClean).maybeSingle();
+    const emailClean = email.toLowerCase().trim();
 
-  if (!user) {
-    await bcrypt.compare('dummy', DUMMY_HASH); // constant-time padding
-    return res.status(401).json({ error: 'Invalid email or password' });
+    const { data: user, error: dbErr } = await supabase
+      .from('users').select('id, password_hash').eq('email', emailClean).maybeSingle();
+
+    if (dbErr) {
+      console.error(JSON.stringify({ event: 'login_db_error', error: dbErr.message }));
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!user) {
+      await bcrypt.compare('dummy', DUMMY_HASH); // constant-time padding
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
+
+    console.log(JSON.stringify({ event: 'login', userId: user.id }));
+    createSession(res, user.id);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'login_unexpected_error', error: err.message, stack: err.stack }));
+    return res.status(500).json({ error: 'Internal server error' });
   }
-
-  const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
-
-  console.log(JSON.stringify({ event: 'login', userId: user.id }));
-  createSession(res, user.id);
-  return res.json({ ok: true });
 }
 
 // ── Session check ─────────────────────────────────────────────────────────────
