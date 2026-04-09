@@ -804,6 +804,73 @@ function HistoryRow({ item, onDelete, style:sx }) {
   );
 }
 
+// ─── Apply Success + Viber ────────────────────────────────────────────────────
+function ApplySuccess({ entry, links, onSuccess }) {
+  const [C] = useTheme();
+  const sd = entry.startDate||entry.start_date, ed = entry.endDate||entry.end_date;
+
+  // Auto-attempt to open Viber for the first recipient on mount.
+  // On iOS standalone PWA, window.location.href is more reliable than <a href>.
+  // iOS may silently block this if too much time passed since the user gesture,
+  // but if Viber is installed it usually succeeds within ~500ms of the tap.
+  useEffect(() => {
+    if (links.length > 0) {
+      const t = setTimeout(() => { window.location.href = links[0].viberUrl; }, 300);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  function openViber(url) { window.location.href = url; }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      <div style={{ background:C.greenSoft, borderRadius:16, padding:'16px 18px', border:`1px solid ${C.green}30`, display:'flex', gap:12, alignItems:'center', animation:'popIn .4s ease' }}>
+        <Icon n="check" size={24} color={C.green}/>
+        <div>
+          <p style={{ fontWeight:700, color:C.green, fontSize:14 }}>Leave Submitted!</p>
+          <p style={{ color:C.green, opacity:.8, fontSize:12, marginTop:2 }}>
+            {entry.typeName||entry.type_name} · {entry.days} day{entry.days>1?'s':''} · {fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''}
+          </p>
+        </div>
+      </div>
+
+      {links.length > 0 ? (
+        <>
+          <Card style={{ padding:'13px 16px', background:C.faint }}>
+            <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Message preview</p>
+            <p style={{ fontSize:13, color:C.textSub, lineHeight:1.6 }}>{links[0].messagePreview}</p>
+          </Card>
+          <p style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>Tap to notify via Viber</p>
+          {links.map(lk => (
+            <button key={lk.id} onClick={() => openViber(lk.viberUrl)}
+              style={{ display:'block', width:'100%', background:'none', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}>
+              <Card style={{ padding:'16px', background:'linear-gradient(135deg,rgba(115,96,242,0.12),rgba(155,139,255,0.10))', border:`1.5px solid ${C.viber}50`, transition:'all .15s' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                  <div style={{ width:46, height:46, borderRadius:14, background:'linear-gradient(135deg,#7360F2,#9B8BFF)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 4px 12px rgba(115,96,242,0.35)' }}>
+                    <Icon n="viber" size={22} color="#fff"/>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <p style={{ fontWeight:700, color:C.viber, fontSize:15 }}>{lk.recipientName}</p>
+                    <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{lk.phone}</p>
+                  </div>
+                  <div style={{ background:C.viber, borderRadius:10, padding:'6px 14px' }}>
+                    <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>Open →</span>
+                  </div>
+                </div>
+              </Card>
+            </button>
+          ))}
+        </>
+      ) : (
+        <Card style={{ padding:'14px 16px', border:`1.5px dashed ${C.border}`, textAlign:'center' }}>
+          <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>No Viber recipients yet.<br/>Add them in <strong>Settings → Viber</strong>.</p>
+        </Card>
+      )}
+      <Btn full variant="ghost" onClick={onSuccess} style={{ marginTop:4 }}>Done</Btn>
+    </div>
+  );
+}
+
 // ─── Apply Form ───────────────────────────────────────────────────────────────
 function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast }) {
   const [C] = useTheme();
@@ -840,51 +907,7 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast }) {
   );
 
   if (entry && links !== null) {
-    const sd = entry.startDate||entry.start_date, ed = entry.endDate||entry.end_date;
-    return (
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <div style={{ background:C.greenSoft, borderRadius:16, padding:'16px 18px', border:`1px solid ${C.green}30`, display:'flex', gap:12, alignItems:'center', animation:'popIn .4s ease' }}>
-          <Icon n="check" size={24} color={C.green}/>
-          <div>
-            <p style={{ fontWeight:700, color:C.green, fontSize:14 }}>Leave Submitted!</p>
-            <p style={{ color:C.green, opacity:.8, fontSize:12, marginTop:2 }}>
-              {entry.typeName||entry.type_name} · {entry.days} day{entry.days>1?'s':''} · {fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''}
-            </p>
-          </div>
-        </div>
-
-        {links.length > 0 ? (
-          <>
-            <Card style={{ padding:'13px 16px', background:C.faint }}>
-              <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Message preview</p>
-              <p style={{ fontSize:13, color:C.textSub, lineHeight:1.6 }}>{links[0].messagePreview}</p>
-            </Card>
-            <p style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em' }}>Notify via Viber</p>
-            {links.map(lk => (
-              <a key={lk.id} href={lk.viberUrl} style={{ textDecoration:'none', display:'block' }}>
-                <Card style={{ padding:'14px 16px', background:'linear-gradient(135deg,rgba(115,96,242,0.08),rgba(155,139,255,0.08))', border:`1px solid ${C.viber}30` }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                    <div style={{ width:42, height:42, borderRadius:13, background:C.viber, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                      <Icon n="viber" size={20} color="#fff"/>
-                    </div>
-                    <div style={{ flex:1 }}>
-                      <p style={{ fontWeight:700, color:C.viber, fontSize:14 }}>{lk.recipientName}</p>
-                      <p style={{ fontSize:12, color:C.muted }}>{lk.phone}</p>
-                    </div>
-                    <span style={{ fontSize:13, fontWeight:700, color:C.viber }}>Open →</span>
-                  </div>
-                </Card>
-              </a>
-            ))}
-          </>
-        ) : (
-          <Card style={{ padding:'14px 16px', border:`1.5px dashed ${C.border}`, textAlign:'center' }}>
-            <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>No Viber recipients yet.<br/>Add them in <strong>Settings → Viber</strong>.</p>
-          </Card>
-        )}
-        <Btn full variant="ghost" onClick={onSuccess} style={{ marginTop:4 }}>Done</Btn>
-      </div>
-    );
+    return <ApplySuccess entry={entry} links={links} onSuccess={onSuccess}/>;
   }
 
   return (
