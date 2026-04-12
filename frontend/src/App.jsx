@@ -67,9 +67,9 @@ const DARK = {
   textSub:    '#9898C0',
   muted:      '#5A5A7A',
   faint:      '#1A1A2E',
-  accent:     '#7C5CFF',
-  accentSoft: 'rgba(124,92,255,0.15)',
-  accentGrad: 'linear-gradient(135deg,#7C5CFF 0%,#C084FC 100%)',
+  accent:     '#8B5CF6',
+  accentSoft: 'rgba(139,92,246,0.18)',
+  accentGrad: 'linear-gradient(135deg,#7C3AED 0%,#A855F7 100%)',
   green:      '#34D399',
   greenSoft:  'rgba(52,211,153,0.12)',
   orange:     '#FBBF24',
@@ -335,7 +335,7 @@ const Spinner = ({ label='Loading…' }) => {
       <div style={{
         width:36, height:36,
         borderRadius:'50%',
-        border:`3px solid ${C.accentSoft}`,
+        border:`3px solid ${C.border}`,
         borderTopColor: C.accent,
         animation:'spin .7s linear infinite',
       }}/>
@@ -807,20 +807,22 @@ function HistoryRow({ item, onDelete, style:sx }) {
 // ─── Apply Success + Viber ────────────────────────────────────────────────────
 function ApplySuccess({ entry, links, onSuccess }) {
   const [C] = useTheme();
+  const [viberOpened, setViberOpened] = useState(false);
   const sd = entry.startDate||entry.start_date, ed = entry.endDate||entry.end_date;
 
-  // Auto-attempt to open Viber for the first recipient on mount.
-  // On iOS standalone PWA, window.location.href is more reliable than <a href>.
-  // iOS may silently block this if too much time passed since the user gesture,
-  // but if Viber is installed it usually succeeds within ~500ms of the tap.
+  // Auto-open Viber for the first recipient on iOS PWA.
+  // 800ms gives the success animation time to complete before switching apps.
   useEffect(() => {
     if (links.length > 0) {
-      const t = setTimeout(() => { window.location.href = links[0].viberUrl; }, 300);
+      const t = setTimeout(() => {
+        setViberOpened(true);
+        window.location.href = links[0].viberUrl;
+      }, 800);
       return () => clearTimeout(t);
     }
   }, []);
 
-  function openViber(url) { window.location.href = url; }
+  function openViber(url) { setViberOpened(true); window.location.href = url; }
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -836,12 +838,20 @@ function ApplySuccess({ entry, links, onSuccess }) {
 
       {links.length > 0 ? (
         <>
+          {!viberOpened && (
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'rgba(115,96,242,0.08)', borderRadius:12, border:`1px solid ${C.viber}25`, animation:'fadeIn .3s ease' }}>
+              <div style={{ width:8, height:8, borderRadius:'50%', background:C.viber, animation:'pulse 1.5s infinite', flexShrink:0 }}/>
+              <p style={{ fontSize:13, color:C.viber, fontWeight:600 }}>Opening Viber for {links[0].recipientName}…</p>
+            </div>
+          )}
           <Card style={{ padding:'13px 16px', background:C.faint }}>
-            <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Message preview</p>
-            <p style={{ fontSize:13, color:C.textSub, lineHeight:1.6 }}>{links[0].messagePreview}</p>
+            <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Message Preview</p>
+            <p style={{ fontSize:13, color:C.textSub, lineHeight:1.6, whiteSpace:'pre-wrap' }}>{links[0].messagePreview}</p>
           </Card>
-          <p style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>Tap to notify via Viber</p>
-          {links.map(lk => (
+          <p style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>
+            {links.length > 1 ? 'Tap to notify via Viber' : 'Notify via Viber'}
+          </p>
+          {links.map((lk, i) => (
             <button key={lk.id} onClick={() => openViber(lk.viberUrl)}
               style={{ display:'block', width:'100%', background:'none', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}>
               <Card style={{ padding:'16px', background:'linear-gradient(135deg,rgba(115,96,242,0.12),rgba(155,139,255,0.10))', border:`1.5px solid ${C.viber}50`, transition:'all .15s' }}>
@@ -854,7 +864,7 @@ function ApplySuccess({ entry, links, onSuccess }) {
                     <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{lk.phone}</p>
                   </div>
                   <div style={{ background:C.viber, borderRadius:10, padding:'6px 14px' }}>
-                    <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>Open →</span>
+                    <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{i===0 && viberOpened ? 'Re-open →' : 'Open →'}</span>
                   </div>
                 </div>
               </Card>
@@ -872,7 +882,7 @@ function ApplySuccess({ entry, links, onSuccess }) {
 }
 
 // ─── Apply Form ───────────────────────────────────────────────────────────────
-function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast }) {
+function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast, onTitleChange }) {
   const [C] = useTheme();
   const t = today();
   const [form, setForm]   = useState({ typeId:leaveTypes[0]?.id||'', start:t, end:t, reason:'' });
@@ -880,6 +890,10 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast }) {
   const [links, setLinks] = useState(null);
   const [entry, setEntry] = useState(null);
   const set = (k,v) => setForm(p=>({...p,[k]:v}));
+
+  useEffect(() => {
+    if (entry && links !== null) onTitleChange?.('Leave Submitted 🎉');
+  }, [entry, links]);
 
   const sel    = leaveTypes.find(l=>l.id===form.typeId);
   const days   = form.start && form.end ? weekdays(form.start, form.end) : 0;
@@ -1329,6 +1343,7 @@ export default function App() {
   const [settOpen,   setSettOpen]   = useState(false);
   const [justReset,  setJustReset]  = useState(false);
   const [toast,      setToast]      = useState(null);
+  const [applySheetTitle, setApplySheetTitle] = useState('Apply for Leave');
   const prevTab = useRef(tab);
 
   function showToast(msg, type='success') { setToast({ msg, type, key:uid() }); }
@@ -1382,7 +1397,7 @@ export default function App() {
         <div style={{ width:56, height:56, borderRadius:18, background:C.accentGrad, display:'flex', alignItems:'center', justifyContent:'center', animation:'float 2s ease-in-out infinite', boxShadow:`0 8px 30px ${C.accentSoft}` }}>
           <Icon n="sparkle" size={26} color="#fff"/>
         </div>
-        <div style={{ width:32, height:32, borderRadius:'50%', border:`3px solid ${C.accentSoft}`, borderTopColor:C.accent, animation:'spin .7s linear infinite' }}/>
+        <div style={{ width:32, height:32, borderRadius:'50%', border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:'spin .7s linear infinite' }}/>
       </div>
     </div>
   );
@@ -1442,7 +1457,6 @@ export default function App() {
         {/* Content */}
         <div style={{ padding:'20px 20px calc(env(safe-area-inset-bottom, 0px) + 90px)', animation:'fadeIn .3s ease' }}>
           {tab==='home'    && <HomeScreen leaveTypes={leaveTypes} settings={settings} history={history} onApply={()=>setApplyOpen(true)} justReset={justReset} onDismissReset={()=>setJustReset(false)}/>}
-          {tab==='apply'   && <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setTab('home')} onSuccess={()=>{loadAll();setTab('home');}} toast={showToast}/>}
           {tab==='history' && <HistoryScreen leaveTypes={leaveTypes} history={history} onRefresh={loadAll} toast={showToast}/>}
         </div>
 
@@ -1458,9 +1472,9 @@ export default function App() {
           zIndex:200,
         }}>
           {[{id:'home',icon:'home',label:'Home'},{id:'apply',icon:'apply',label:'Apply'},{id:'history',icon:'hist',label:'History'}].map(({id,icon,label}) => {
-            const active = tab===id;
+            const active = id==='apply' ? applyOpen : tab===id;
             return (
-              <button key={id} onClick={()=>setTab(id)} style={{
+              <button key={id} onClick={()=> id==='apply' ? setApplyOpen(true) : setTab(id)} style={{
                 flex:1, background:'none', border:'none', cursor:'pointer',
                 display:'flex', flexDirection:'column', alignItems:'center', gap:5, padding:'6px 0',
                 fontFamily:"'Inter',sans-serif",
@@ -1483,8 +1497,12 @@ export default function App() {
 
         {/* Apply Sheet */}
         {applyOpen && (
-          <Sheet title="Apply for Leave" onClose={()=>{loadAll();setApplyOpen(false);}}>
-            <ApplyForm leaveTypes={leaveTypes} recipients={recipients} onClose={()=>setApplyOpen(false)} onSuccess={()=>{loadAll();setApplyOpen(false);showToast('Leave submitted!');}} toast={showToast}/>
+          <Sheet title={applySheetTitle} onClose={()=>{loadAll();setApplyOpen(false);setApplySheetTitle('Apply for Leave');}}>
+            <ApplyForm leaveTypes={leaveTypes} recipients={recipients}
+              onClose={()=>{setApplyOpen(false);setApplySheetTitle('Apply for Leave');}}
+              onTitleChange={setApplySheetTitle}
+              onSuccess={()=>{loadAll();setApplyOpen(false);setApplySheetTitle('Apply for Leave');showToast('Leave submitted!');}}
+              toast={showToast}/>
           </Sheet>
         )}
 
