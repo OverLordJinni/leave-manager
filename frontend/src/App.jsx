@@ -1,6 +1,8 @@
-// src/App.jsx — full UI redesign: dark mode, animations, glassmorphism
+// src/App.jsx — Leave Manager UI, redesigned to "warm editorial minimalism".
+// Paper + ink + one teal accent. No gradients. Hairlines over shadows.
 import { useState, useEffect, useRef } from 'react';
 import * as api from './api.js';
+import './tokens.css';
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 function weekdays(a, b) {
@@ -21,15 +23,6 @@ function fmt(s) {
 function uid() { return Math.random().toString(36).slice(2,9); }
 const today = () => new Date().toISOString().split('T')[0];
 
-// Decode urgent_task from stored reason (mirrors backend encoding)
-const UT_MARKER = '\n__UT__:';
-function splitReason(str) {
-  if (!str) return { reason: '', urgentTask: '' };
-  const idx = str.indexOf(UT_MARKER);
-  if (idx === -1) return { reason: str, urgentTask: '' };
-  return { reason: str.slice(0, idx), urgentTask: str.slice(idx + UT_MARKER.length) };
-}
-
 // ─── WebAuthn helpers ─────────────────────────────────────────────────────────
 const b64urlToUint8 = s => {
   const b64 = s.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(s.length/4)*4,'=');
@@ -39,397 +32,279 @@ const uint8ToB64url = u =>
   btoa(String.fromCharCode(...new Uint8Array(u))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
-const LIGHT = {
-  bg:         '#F0F0F5',
-  surface:    '#FFFFFF',
-  surfaceHigh:'#FFFFFF',
-  glass:      'rgba(255,255,255,0.75)',
-  glassBorder:'rgba(255,255,255,0.6)',
-  border:     '#E5E4F0',
-  text:       '#0D0D1A',
-  textSub:    '#555570',
-  muted:      '#9898B0',
-  faint:      '#F5F5FA',
-  accent:     '#6C47FF',
-  accentSoft: 'rgba(108,71,255,0.12)',
-  accentGrad: 'linear-gradient(135deg,#6C47FF 0%,#A855F7 100%)',
-  green:      '#10B981',
-  greenSoft:  'rgba(16,185,129,0.12)',
-  orange:     '#F59E0B',
-  orangeSoft: 'rgba(245,158,11,0.12)',
-  red:        '#EF4444',
-  redSoft:    'rgba(239,68,68,0.12)',
-  viber:      '#7360F2',
-  shadow:     '0 4px 24px rgba(108,71,255,0.08), 0 1px 4px rgba(0,0,0,0.04)',
-  shadowLg:   '0 20px 60px rgba(108,71,255,0.15), 0 4px 16px rgba(0,0,0,0.06)',
-  navBg:      'rgba(255,255,255,0.85)',
-};
-
-const DARK = {
-  bg:         '#0A0A12',
-  surface:    '#13131F',
-  surfaceHigh:'#1C1C2E',
-  glass:      'rgba(19,19,31,0.85)',
-  glassBorder:'rgba(255,255,255,0.08)',
-  border:     '#2A2A3D',
-  text:       '#F0F0FF',
-  textSub:    '#9898C0',
-  muted:      '#5A5A7A',
-  faint:      '#1A1A2E',
-  accent:     '#8B5CF6',
-  accentSoft: 'rgba(139,92,246,0.18)',
-  accentGrad: 'linear-gradient(135deg,#7C3AED 0%,#A855F7 100%)',
-  green:      '#34D399',
-  greenSoft:  'rgba(52,211,153,0.12)',
-  orange:     '#FBBF24',
-  orangeSoft: 'rgba(251,191,36,0.12)',
-  red:        '#F87171',
-  redSoft:    'rgba(248,113,113,0.12)',
-  viber:      '#9B8BFF',
-  shadow:     '0 4px 24px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2)',
-  shadowLg:   '0 20px 60px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.3)',
-  navBg:      'rgba(13,13,22,0.92)',
-};
-
-const PALETTE = ['#6C47FF','#10B981','#EF4444','#F59E0B','#7C3AED','#0891B2','#EC4899','#059669','#F97316'];
-
-// ─── Icons ────────────────────────────────────────────────────────────────────
-const Icon = ({ n, size=20, color='currentColor' }) => {
-  const p = {
-    home:    <><path d="M3 12L12 3l9 9"/><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></>,
-    plus:    <><path d="M12 5v14M5 12h14"/></>,
-    apply:   <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 2v4M16 2v4M3 10h18M8 14h4M8 18h6"/></>,
-    hist:    <><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></>,
-    cog:     <><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41M21 12h-2M5 12H3M12 21v-2M12 5V3"/></>,
-    viber:   <><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a6 6 0 00-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M13 3a9 9 0 018 8.5 8.5 8.5 0 01-8.5 8.5C9.89 20 7 18.5 5 16l-3 1 1-3C1.5 12 1 10.11 1 8.5A8.5 8.5 0 019.5 0"/></>,
-    trash:   <><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></>,
-    edit:    <><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
-    check:   <><path d="M20 6L9 17l-5-5"/></>,
-    x:       <><path d="M18 6L6 18M6 6l12 12"/></>,
-    cal:     <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></>,
-    user:    <><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></>,
-    info:    <><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></>,
-    arrow:   <><path d="M5 12h14M12 5l7 7-7 7"/></>,
-    refresh: <><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></>,
-    lock:    <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></>,
-    eye:     <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>,
-    eyeoff:  <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></>,
-    sun:     <><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></>,
-    moon:    <><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></>,
-    sparkle: <><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M5 17l.75 2.25L8 20l-2.25.75L5 23l-.75-2.25L2 20l2.25-.75L5 17z"/></>,
-    fingerprint: <><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 17.5a14.5 14.5 0 0 0 4.24 5.2"/><path d="M6 10a6 6 0 0 1 11.73-1"/><path d="M9.52 19.85a19 19 0 0 1 .38-5.05"/></>,
-  };
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {p[n]}
-    </svg>
-  );
-};
-
-// ─── Global CSS injected once ─────────────────────────────────────────────────
-const GLOBAL_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Cal+Sans:wght@600&display=swap');
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-  html{-webkit-text-size-adjust:100%;}
-  body{overscroll-behavior:none;-webkit-font-smoothing:antialiased;}
-  input,select,button,textarea{font-family:'Inter',sans-serif;}
-  button,a{touch-action:manipulation;}
-  button{-webkit-user-select:none;user-select:none;}
-  input[type=date]::-webkit-calendar-picker-indicator{opacity:.5;cursor:pointer;filter:var(--cal-filter,none);}
-  ::-webkit-scrollbar{width:3px;}
-  ::-webkit-scrollbar-thumb{background:rgba(128,128,180,0.25);border-radius:3px;}
-  @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
-  @keyframes slideDown{from{transform:translateY(-12px);opacity:0}to{transform:translateY(0);opacity:1}}
-  @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-  @keyframes fadeInScale{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
-  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
-  @keyframes popIn{0%{transform:scale(.8);opacity:0}70%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}
-  @keyframes gradShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
-  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
-  @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-12px) scale(.95)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
-  button:active:not(:disabled){transform:scale(.97);}
-  a:active{opacity:.75;}
-`;
-
-// ─── Primitives ───────────────────────────────────────────────────────────────
 function useTheme() {
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem('lm_theme');
     if (saved) return saved === 'dark';
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
-  useEffect(() => { localStorage.setItem('lm_theme', dark ? 'dark' : 'light'); }, [dark]);
-  return [dark ? DARK : LIGHT, dark, () => setDark(d => !d)];
+  useEffect(() => {
+    localStorage.setItem('lm_theme', dark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', dark ? '#15140F' : '#F6F2EA');
+  }, [dark]);
+  return [dark, () => setDark(d => !d)];
 }
 
-const Btn = ({ children, variant='primary', full, sm, loading, style:sx, disabled, onClick }) => {
-  const [C] = useTheme();
-  const variants = {
-    primary: { background: C.accentGrad, color:'#fff', border:'none', boxShadow:`0 4px 15px ${C.accentSoft}` },
-    ghost:   { background: C.faint, color: C.text, border:`1.5px solid ${C.border}` },
-    danger:  { background: C.redSoft, color: C.red, border:`1.5px solid ${C.red}30` },
-    viber:   { background:'linear-gradient(135deg,#7360F2,#9B8BFF)', color:'#fff', border:'none' },
-    glass:   { background: C.glass, color: C.text, border:`1.5px solid ${C.glassBorder}`, backdropFilter:'blur(12px)' },
-  };
-  const base = {
-    borderRadius:14, fontWeight:600, cursor:(disabled||loading)?'not-allowed':'pointer',
-    fontFamily:"'Inter',sans-serif", display:'inline-flex', alignItems:'center', justifyContent:'center',
-    gap:8, transition:'all .2s cubic-bezier(.34,1.56,.64,1)',
-    padding: sm ? '8px 16px' : '13px 22px',
-    fontSize: sm ? 13 : 15,
-    width: full ? '100%' : undefined,
-    opacity: (disabled||loading) ? 0.5 : 1,
-    letterSpacing: '-0.01em',
+// ─── Icon (Lucide stroke set) ────────────────────────────────────────────────
+function Icon({ name, size = 18, style }) {
+  const paths = {
+    home: <><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>,
+    'calendar-plus': <><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M16 19h6"/><path d="M19 16v6"/></>,
+    clock: <><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>,
+    settings: <><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>,
+    'message-circle': <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/>,
+    'trash-2': <><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></>,
+    pencil: <><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></>,
+    check: <polyline points="20 6 9 17 4 12"/>,
+    x: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
+    calendar: <><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></>,
+    fingerprint: <><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></>,
+    'arrow-right': <><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></>,
+    info: <><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></>,
+    plus: <><path d="M5 12h14"/><path d="M12 5v14"/></>,
+    sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></>,
+    moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>,
+    'chevron-right': <path d="m9 18 6-6-6-6"/>,
+    user: <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
+    'rotate-ccw': <><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>,
+    lock: <><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
+    eye: <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></>,
+    'eye-off': <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></>,
+    mail: <><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></>,
   };
   return (
-    <button style={{ ...base, ...variants[variant], ...sx }}
-      disabled={disabled||loading}
-      onClick={(!disabled && !loading) ? onClick : undefined}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={style} aria-hidden="true">
+      {paths[name]}
+    </svg>
+  );
+}
+
+// ─── Primitives ───────────────────────────────────────────────────────────────
+const buttonBase = (size, full, disabled) => ({
+  fontFamily: 'var(--ff-text)', fontWeight: 600, letterSpacing: '-0.005em',
+  border: '1px solid transparent', borderRadius: 10,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+  padding: size === 'sm' ? '8px 12px' : size === 'lg' ? '14px 20px' : '12px 16px',
+  fontSize: size === 'sm' ? 13 : 15,
+  width: full ? '100%' : undefined,
+  opacity: disabled ? 0.45 : 1,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  transition: 'background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), transform var(--dur-fast) var(--ease-spring)',
+});
+
+function Btn({ children, variant = 'primary', size = 'md', full, leading, trailing, onClick, disabled, loading, type = 'button', style }) {
+  const variants = {
+    primary:   { background: 'var(--accent)', color: 'var(--accent-ink)' },
+    secondary: { background: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--rule)' },
+    ghost:     { background: 'transparent', color: 'var(--ink)' },
+    danger:    { background: 'var(--surface)', color: 'var(--danger)', borderColor: 'var(--rule)' },
+    viber:     { background: 'var(--viber)', color: '#fff' },
+  };
+  return (
+    <button type={type} className="lm-press" onClick={(disabled || loading) ? undefined : onClick} disabled={disabled || loading}
+      style={{ ...buttonBase(size, full, disabled || loading), ...variants[variant], ...style }}>
       {loading
-        ? <span style={{ width:16, height:16, border:'2.5px solid currentColor', borderTopColor:'transparent', borderRadius:'50%', display:'inline-block', animation:'spin .6s linear infinite' }}/>
-        : children}
+        ? <span style={{ width: 14, height: 14, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'lmSpin .7s linear infinite' }}/>
+        : <>
+            {leading && <Icon name={leading} size={size === 'sm' ? 14 : 16} />}
+            {children}
+            {trailing && <Icon name={trailing} size={size === 'sm' ? 14 : 16} />}
+          </>}
     </button>
   );
-};
+}
 
-const Card = ({ children, style:sx, glass, onClick }) => {
-  const [C] = useTheme();
+function Card({ children, style, pad = 20, onClick }) {
   return (
     <div onClick={onClick} style={{
-      background: glass ? C.glass : C.surface,
-      border: `1px solid ${C.border}`,
-      borderRadius: 20,
-      boxShadow: C.shadow,
-      backdropFilter: glass ? 'blur(20px)' : undefined,
-      transition: 'all .2s ease',
+      background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 16,
+      padding: pad, boxShadow: 'var(--shadow-1)',
       cursor: onClick ? 'pointer' : undefined,
-      ...(sx||{})
-    }}>
+      ...style,
+    }}>{children}</div>
+  );
+}
+
+function Field({ label, helper, error, children }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {label && <span className="lm-eyebrow">{label}</span>}
       {children}
-    </div>
+      {error ? <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span>
+        : helper ? <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{helper}</span> : null}
+    </label>
   );
-};
+}
 
-const Field = ({ label, helper, children }) => {
-  const [C] = useTheme();
+function Input({ label, helper, error, rightSlot, ...props }) {
+  const [f, setF] = useState(false);
+  const inputStyle = {
+    fontFamily: 'var(--ff-text)', fontSize: 15,
+    background: 'var(--surface)', color: 'var(--ink)',
+    border: `1px solid ${error ? 'var(--danger)' : f ? 'var(--accent)' : 'var(--rule)'}`,
+    borderRadius: 10, padding: rightSlot ? '10px 40px 10px 12px' : '10px 12px',
+    outline: 'none', width: '100%', boxSizing: 'border-box',
+    boxShadow: f ? 'var(--shadow-focus)' : 'none',
+    transition: 'border-color var(--dur), box-shadow var(--dur)',
+  };
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-      {label && <label style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em' }}>{label}</label>}
-      {children}
-      {helper && <p style={{ fontSize:11, color:C.muted, marginTop:1, lineHeight:1.5 }}>{helper}</p>}
-    </div>
-  );
-};
-
-const TInput = ({ label, helper, style:sx, ...props }) => {
-  const [C] = useTheme();
-  const [focused, setFocused] = useState(false);
-  return (
-    <Field label={label} helper={helper}>
-      <input {...props}
-        onFocus={e => { setFocused(true); props.onFocus?.(e); }}
-        onBlur={e => { setFocused(false); props.onBlur?.(e); }}
-        style={{
-          border: `1.5px solid ${focused ? C.accent : C.border}`,
-          borderRadius: 12, padding: '12px 14px',
-          fontSize: 16, background: C.faint, outline: 'none',
-          fontFamily: "'Inter',sans-serif", color: C.text,
-          transition: 'border-color .2s, box-shadow .2s',
-          boxShadow: focused ? `0 0 0 3px ${C.accentSoft}` : 'none',
-          ...(sx||{})
-        }}/>
-    </Field>
-  );
-};
-
-const SelInput = ({ label, helper, children, ...props }) => {
-  const [C] = useTheme();
-  return (
-    <Field label={label} helper={helper}>
-      <div style={{ position:'relative' }}>
-        <select {...props} style={{
-          border:`1.5px solid ${C.border}`, borderRadius:12, padding:'12px 40px 12px 14px',
-          fontSize:16, background:C.faint, outline:'none',
-          fontFamily:"'Inter',sans-serif", color:C.text, appearance:'none', width:'100%',
-          transition:'border-color .2s',
-        }}>{children}</select>
-        <span style={{ position:'absolute', right:14, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:C.muted, fontSize:10 }}>▾</span>
+    <Field label={label} helper={helper} error={error}>
+      <div style={{ position: 'relative' }}>
+        <input {...props}
+          onFocus={e => { setF(true); props.onFocus?.(e); }}
+          onBlur={e => { setF(false); props.onBlur?.(e); }}
+          style={inputStyle}/>
+        {rightSlot && (
+          <div style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}>
+            {rightSlot}
+          </div>
+        )}
       </div>
     </Field>
   );
-};
+}
 
-const Pill = ({ color, label }) => (
-  <span style={{ display:'inline-flex', alignItems:'center', gap:4,
-    background:`${color}18`, color, borderRadius:99, padding:'3px 10px', fontSize:11, fontWeight:700 }}>
-    <span style={{ width:5, height:5, borderRadius:'50%', background:color, display:'inline-block' }}/>
-    {label}
-  </span>
-);
-
-const Toast = ({ msg, type='success', onDone }) => {
-  const [C] = useTheme();
-  useEffect(() => { const t = setTimeout(onDone, 3500); return () => clearTimeout(t); }, []);
-  const isErr = type === 'error';
+function Select({ label, helper, children, ...props }) {
+  const [f, setF] = useState(false);
   return (
-    <div style={{
-      position:'fixed', top:'calc(env(safe-area-inset-top, 0px) + 60px)', left:'50%',
-      transform:'translateX(-50%)',
-      background: isErr ? C.redSoft : C.greenSoft,
-      border:`1.5px solid ${isErr ? C.red : C.green}40`,
-      borderRadius:16, padding:'12px 20px',
-      fontSize:13, fontWeight:600, color: isErr ? C.red : C.green,
-      zIndex:9999, maxWidth:340, textAlign:'center',
-      boxShadow: C.shadowLg,
-      animation:'toastIn .3s cubic-bezier(.34,1.56,.64,1)',
-      fontFamily:"'Inter',sans-serif", whiteSpace:'pre-line',
-      backdropFilter:'blur(20px)',
-    }}>
-      {isErr ? '⚠ ' : '✓ '}{msg}
-    </div>
+    <Field label={label} helper={helper}>
+      <div style={{ position: 'relative' }}>
+        <select {...props}
+          onFocus={() => setF(true)} onBlur={() => setF(false)}
+          style={{
+            fontFamily: 'var(--ff-text)', fontSize: 15,
+            background: 'var(--surface)', color: 'var(--ink)',
+            border: `1px solid ${f ? 'var(--accent)' : 'var(--rule)'}`,
+            borderRadius: 10, padding: '10px 36px 10px 12px',
+            outline: 'none', width: '100%', appearance: 'none', boxSizing: 'border-box',
+            boxShadow: f ? 'var(--shadow-focus)' : 'none',
+          }}>{children}</select>
+        <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%) rotate(90deg)', color: 'var(--ink-3)', pointerEvents: 'none', display: 'inline-flex' }}>
+          <Icon name="chevron-right" size={14}/>
+        </span>
+      </div>
+    </Field>
   );
-};
+}
 
-const Sheet = ({ title, onClose, children }) => {
-  const [C] = useTheme();
+function Pill({ tone = 'neutral', children }) {
+  const tones = {
+    neutral: { bg: 'var(--paper-2)', fg: 'var(--ink-2)', dot: 'var(--ink-3)' },
+    accent:  { bg: 'var(--accent-soft)', fg: 'var(--accent)', dot: 'var(--accent)' },
+    ok:      { bg: 'var(--ok-soft)', fg: 'var(--ok)', dot: 'var(--ok)' },
+    warn:    { bg: 'var(--warn-soft)', fg: 'var(--warn)', dot: 'var(--warn)' },
+    danger:  { bg: 'var(--danger-soft)', fg: 'var(--danger)', dot: 'var(--danger)' },
+    viber:   { bg: 'var(--viber-soft)', fg: 'var(--viber)', dot: 'var(--viber)' },
+  };
+  const t = tones[tone];
   return (
-    <div style={{
-      position:'fixed', inset:0,
-      background:'rgba(0,0,0,.6)',
-      zIndex:500,
-      display:'flex', alignItems:'flex-end', justifyContent:'center',
-      backdropFilter:'blur(4px)',
-      animation:'fadeInScale .2s ease',
-    }}
-      onClick={e => e.target===e.currentTarget && onClose()}>
-      <div style={{
-        background: C.surface,
-        borderRadius:'24px 24px 0 0',
-        width:'100%', maxWidth:480,
-        maxHeight:'92vh', overflowY:'auto',
-        WebkitOverflowScrolling:'touch',
-        paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 40px)',
-        boxShadow: C.shadowLg,
-        animation:'slideUp .3s cubic-bezier(.32,.72,0,1)',
-        border:`1px solid ${C.border}`,
-        borderBottom:'none',
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      background: t.bg, color: t.fg,
+      fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 999,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: 999, background: t.dot }}/>
+      {children}
+    </span>
+  );
+}
+
+function Sheet({ title, onClose, children, maxWidth = 480 }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div onClick={e => e.target === e.currentTarget && onClose()}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(19,19,18,0.4)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 500,
+        animation: 'lmFadeIn var(--dur) var(--ease-out)',
       }}>
-        <div style={{ display:'flex', justifyContent:'center', padding:'14px 0 4px' }}>
-          <div style={{ width:40, height:4, borderRadius:99, background:C.border }}/>
+      <div style={{
+        background: 'var(--surface)', borderRadius: '22px 22px 0 0',
+        width: '100%', maxWidth, maxHeight: '92vh', overflowY: 'auto',
+        padding: '8px 20px calc(env(safe-area-inset-bottom, 0px) + 28px)',
+        boxShadow: 'var(--shadow-2)',
+        animation: 'lmSlideUp var(--dur-slow) var(--ease-out)',
+        border: '1px solid var(--rule)', borderBottom: 'none',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 6 }}>
+          <div style={{ width: 36, height: 4, borderRadius: 99, background: 'var(--ink-4)' }}/>
         </div>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 20px 18px' }}>
-          <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:C.text, fontFamily:"'Cal Sans','Inter',sans-serif", letterSpacing:'-0.02em' }}>{title}</h2>
-          <button onClick={onClose} style={{
-            background:C.faint, border:`1px solid ${C.border}`, borderRadius:12,
-            width:34, height:34, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
-            transition:'all .15s',
-          }}>
-            <Icon n="x" size={15} color={C.muted}/>
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0 14px', gap: 12 }}>
+          <h2 className="lm-h2" style={{ flex: 1, minWidth: 0 }}>{title}</h2>
+          <button onClick={onClose} aria-label="Close" style={{
+            background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 10,
+            width: 32, height: 32, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--ink-2)', flexShrink: 0,
+          }}><Icon name="x" size={14}/></button>
         </div>
-        <div style={{ padding:'0 20px' }}>{children}</div>
+        {children}
       </div>
     </div>
   );
-};
+}
 
-const Spinner = ({ label='Loading…' }) => {
-  const [C] = useTheme();
+function Toast({ message, tone = 'ok' }) {
+  const tones = {
+    ok: { bg: 'var(--ink)', fg: 'var(--paper)' },
+    error: { bg: 'var(--danger)', fg: '#fff' },
+  };
+  const t = tones[tone] || tones.ok;
   return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-      gap:14, padding:'60px 20px', color:C.muted, fontFamily:"'Inter',sans-serif" }}>
+    <div role="status" aria-live="polite" style={{
+      position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 96px)',
+      left: '50%', transform: 'translateX(-50%)',
+      background: t.bg, color: t.fg,
+      padding: '10px 18px', borderRadius: 999, fontSize: 13, fontWeight: 500,
+      boxShadow: 'var(--shadow-2)', zIndex: 2000,
+      animation: 'lmFadeIn var(--dur) var(--ease-out)',
+      pointerEvents: 'none', maxWidth: 320, textAlign: 'center',
+    }}>{message}</div>
+  );
+}
+
+function Spinner({ label }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 60 }}>
       <div style={{
-        width:36, height:36,
-        borderRadius:'50%',
-        border:`3px solid ${C.border}`,
-        borderTopColor: C.accent,
-        animation:'spin .7s linear infinite',
+        width: 28, height: 28, borderRadius: '50%',
+        border: '2px solid var(--rule)', borderTopColor: 'var(--accent)',
+        animation: 'lmSpin .7s linear infinite',
       }}/>
-      <span style={{ fontSize:13, fontWeight:500 }}>{label}</span>
+      {label && <span className="lm-meta">{label}</span>}
     </div>
   );
-};
+}
 
-// ─── Dark Mode Toggle ─────────────────────────────────────────────────────────
-function DarkToggle({ dark, onToggle }) {
-  const [C] = useTheme();
+function ThemeToggle({ dark, onToggle }) {
   return (
-    <button onClick={onToggle} style={{
-      width:42, height:24, borderRadius:99, border:'none', cursor:'pointer',
-      background: dark ? C.accentGrad : C.faint,
-      border: `1.5px solid ${C.border}`,
-      position:'relative', transition:'all .3s ease',
-      display:'flex', alignItems:'center',
-      padding:'2px 3px',
-      flexShrink:0,
+    <button onClick={onToggle} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} style={{
+      width: 36, height: 36, borderRadius: 10,
+      background: 'var(--surface)', border: '1px solid var(--rule)',
+      color: 'var(--ink-2)',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     }}>
-      <div style={{
-        width:18, height:18, borderRadius:'50%',
-        background: dark ? '#fff' : C.accent,
-        transform: dark ? 'translateX(18px)' : 'translateX(0)',
-        transition:'transform .3s cubic-bezier(.34,1.56,.64,1)',
-        display:'flex', alignItems:'center', justifyContent:'center',
-        boxShadow:'0 1px 4px rgba(0,0,0,.2)',
-      }}>
-        <Icon n={dark ? 'moon' : 'sun'} size={10} color={dark ? '#6C47FF' : '#fff'}/>
-      </div>
+      <Icon name={dark ? 'sun' : 'moon'} size={16}/>
     </button>
   );
 }
 
-// ─── Ring ─────────────────────────────────────────────────────────────────────
-function Ring({ total, used, color, name, size=100 }) {
-  const [C] = useTheme();
-  const rem = Math.max(0, total-used), pct = total>0 ? rem/total : 1;
-  const r = size/2-9, circ = 2*Math.PI*r;
-  const usedPct = total>0 ? used/total : 0;
-  const statusColor = usedPct > 0.8 ? C.red : usedPct > 0.5 ? C.orange : color;
-  return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, animation:'fadeIn .5s ease both' }}>
-      <div style={{ position:'relative', width:size, height:size }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.faint} strokeWidth="9"/>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={statusColor} strokeWidth="9"
-            strokeDasharray={`${circ*pct} ${circ}`} strokeLinecap="round"
-            transform={`rotate(-90 ${size/2} ${size/2})`}
-            style={{ transition:'stroke-dasharray .9s cubic-bezier(.4,0,.2,1)', filter:`drop-shadow(0 0 6px ${statusColor}60)` }}/>
-        </svg>
-        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>
-          <span style={{ fontSize:20, fontWeight:800, color:C.text, lineHeight:1, letterSpacing:'-0.03em' }}>{rem}</span>
-          <span style={{ fontSize:9, color:C.muted, fontWeight:600, letterSpacing:'0.04em', marginTop:1 }}>/ {total}</span>
-        </div>
-      </div>
-      <span style={{ fontSize:11, color:C.textSub, fontWeight:600, textAlign:'center', maxWidth:90, lineHeight:1.3 }}>{name}</span>
-    </div>
-  );
-}
-
-// ─── Auth Screen ──────────────────────────────────────────────────────────────
-function AuthScreen({ onLogin }) {
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+function AuthScreen({ onLogin, dark, onToggleDark }) {
   const [view, setView] = useState('login');
-  const [C, dark, toggleDark] = useTheme();
   return (
-    <div style={{
-      minHeight:'100vh',
-      background: dark
-        ? 'radial-gradient(ellipse at 20% 20%, #1A0A3C 0%, #0A0A12 50%, #0A1A1A 100%)'
-        : 'radial-gradient(ellipse at 20% 20%, #EDE8FF 0%, #F0F0F5 50%, #E8F0FF 100%)',
-      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-      padding:'32px 20px', fontFamily:"'Inter',sans-serif",
-      position:'relative', overflow:'hidden',
-    }}>
-      {/* Background orbs */}
-      <div style={{ position:'absolute', top:'10%', left:'15%', width:200, height:200, borderRadius:'50%', background: dark ? 'rgba(108,71,255,0.08)' : 'rgba(108,71,255,0.06)', filter:'blur(60px)', animation:'float 6s ease-in-out infinite', pointerEvents:'none' }}/>
-      <div style={{ position:'absolute', bottom:'15%', right:'10%', width:160, height:160, borderRadius:'50%', background: dark ? 'rgba(168,85,247,0.06)' : 'rgba(168,85,247,0.05)', filter:'blur(50px)', animation:'float 8s ease-in-out infinite reverse', pointerEvents:'none' }}/>
-
-      <div style={{ position:'absolute', top:20, right:20 }}>
-        <DarkToggle dark={dark} onToggle={toggleDark}/>
+    <div style={{ minHeight: '100vh', background: 'var(--paper)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'calc(env(safe-area-inset-top, 0px) + 16px) 20px 0' }}>
+        <span className="lm-eyebrow">Leave Manager</span>
+        <ThemeToggle dark={dark} onToggle={onToggleDark}/>
       </div>
-
-      <div style={{ animation:'fadeInScale .4s ease' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: 420, margin: '0 auto', width: '100%', padding: '24px 24px calc(env(safe-area-inset-bottom, 0px) + 32px)' }}>
         {view === 'login'  && <LoginForm  onLogin={onLogin} onSwitch={setView}/>}
         {view === 'signup' && <SignupForm onLogin={onLogin} onSwitch={setView}/>}
         {view === 'forgot' && <ForgotForm onSwitch={setView}/>}
@@ -438,73 +313,39 @@ function AuthScreen({ onLogin }) {
   );
 }
 
-function AuthCard({ subtitle, children }) {
-  const [C] = useTheme();
+function AuthHero({ title, body }) {
   return (
-    <div style={{ width:'100%', maxWidth:380, display:'flex', flexDirection:'column', gap:24 }}>
-      <div style={{ textAlign:'center' }}>
-        <div style={{
-          width:64, height:64, borderRadius:20,
-          background: C.accentGrad,
-          display:'flex', alignItems:'center', justifyContent:'center',
-          margin:'0 auto 18px',
-          boxShadow:`0 8px 30px ${C.accentSoft}`,
-          animation:'popIn .5s cubic-bezier(.34,1.56,.64,1)',
-        }}>
-          <Icon n="sparkle" size={28} color="#fff"/>
-        </div>
-        <h1 style={{ fontSize:26, fontWeight:800, color:C.text, fontFamily:"'Cal Sans','Inter',sans-serif", margin:'0 0 6px', letterSpacing:'-0.03em' }}>Leave Manager</h1>
-        <p style={{ fontSize:14, color:C.muted, margin:0, fontWeight:500 }}>{subtitle}</p>
-      </div>
-      <div style={{ background: C.surface, border:`1px solid ${C.border}`, borderRadius:24, padding:'28px 24px', boxShadow: C.shadow }}>
-        {children}
-      </div>
+    <div style={{ marginBottom: 28 }}>
+      <h1 className="lm-display" style={{ fontSize: 44, lineHeight: 1.02, margin: 0, letterSpacing: '-0.025em', maxWidth: 340 }}>
+        {title}
+      </h1>
+      <p style={{ marginTop: 14, fontSize: 15, color: 'var(--ink-2)', maxWidth: 320, lineHeight: 1.5 }}>{body}</p>
     </div>
   );
 }
 
-function AuthInput({ label, type='text', value, onChange, placeholder, autoComplete, error }) {
-  const [C] = useTheme();
+function PasswordInput({ value, onChange, label = 'Password', placeholder, autoComplete = 'current-password', error }) {
   const [show, setShow] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const isPw = type === 'password';
   return (
-    <Field label={label}>
-      <div style={{ position:'relative' }}>
-        <input
-          type={isPw && show ? 'text' : type}
-          value={value} onChange={onChange}
-          placeholder={placeholder} autoComplete={autoComplete}
-          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-          style={{
-            border: `1.5px solid ${error ? C.red : focused ? C.accent : C.border}`,
-            borderRadius:12,
-            padding: isPw ? '13px 46px 13px 14px' : '13px 14px',
-            fontSize:15, background:C.faint, outline:'none', width:'100%',
-            fontFamily:"'Inter',sans-serif", color:C.text, boxSizing:'border-box',
-            transition:'border-color .2s, box-shadow .2s',
-            boxShadow: focused ? `0 0 0 3px ${error ? C.redSoft : C.accentSoft}` : 'none',
-          }}/>
-        {isPw && (
-          <button type="button" onClick={() => setShow(s => !s)}
-            style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)',
-              background:'none', border:'none', cursor:'pointer', padding:4, borderRadius:6 }}>
-            <Icon n={show ? 'eyeoff' : 'eye'} size={16} color={C.muted}/>
-          </button>
-        )}
-      </div>
-      {error && <p style={{ fontSize:12, color:C.red, margin:'4px 0 0', fontWeight:500 }}>{error}</p>}
-    </Field>
+    <Input label={label} type={show ? 'text' : 'password'} value={value}
+      onChange={onChange} placeholder={placeholder} autoComplete={autoComplete}
+      error={error}
+      rightSlot={
+        <button type="button" onClick={() => setShow(s => !s)}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          style={{ background: 'transparent', border: 0, padding: 6, color: 'var(--ink-3)', display: 'inline-flex' }}>
+          <Icon name={show ? 'eye-off' : 'eye'} size={16}/>
+        </button>
+      }/>
   );
 }
 
 function LoginForm({ onLogin, onSwitch }) {
-  const [C] = useTheme();
-  const [email, setEmail]     = useState('');
-  const [pw, setPw]           = useState('');
-  const [err, setErr]         = useState('');
+  const [email, setEmail] = useState('');
+  const [pw, setPw]       = useState('');
+  const [err, setErr]     = useState('');
   const [loading, setLoading] = useState(false);
-  const [pkLoading, setPKLoad]= useState(false);
+  const [pkLoading, setPkLoad] = useState(false);
 
   async function submit(e) {
     e?.preventDefault?.();
@@ -516,46 +357,55 @@ function LoginForm({ onLogin, onSwitch }) {
   }
 
   async function signInWithPasskey() {
-    if (!window.PublicKeyCredential) { setErr('Passkeys not supported on this browser.'); return; }
-    setPKLoad(true); setErr('');
+    if (!window.PublicKeyCredential) { setErr('Passkeys are not supported on this browser.'); return; }
+    setPkLoad(true); setErr('');
     try {
       const { challenge, challengeId, rpId } = await api.getPasskeyChallenge();
       const assertion = await navigator.credentials.get({
-        publicKey: { challenge: b64urlToUint8(challenge), rpId, allowCredentials:[], userVerification:'required', timeout:60000 },
+        publicKey: { challenge: b64urlToUint8(challenge), rpId, allowCredentials: [], userVerification: 'required', timeout: 60000 },
       });
       if (!assertion) throw new Error('No credential returned');
       await api.loginPasskey({ credentialId: assertion.id, challengeId, verified: true });
       onLogin();
-    } catch(e) {
-      if (e.name==='NotAllowedError') setErr('Passkey sign-in was cancelled.');
+    } catch (e) {
+      if (e.name === 'NotAllowedError') setErr('Passkey sign-in was cancelled.');
       else setErr(e.message || 'Passkey sign-in failed.');
-    } finally { setPKLoad(false); }
+    } finally { setPkLoad(false); }
   }
 
   return (
-    <AuthCard subtitle="Sign in to your account">
-      <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:16 }}>
-        <AuthInput label="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com" autoComplete="email"/>
-        <AuthInput label="Password" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="Your password" autoComplete="current-password" error={err}/>
-        <Btn full onClick={submit} loading={loading} style={{ marginTop:4 }}>
-          Sign In <Icon n="arrow" size={16} color="#fff"/>
-        </Btn>
-      </form>
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <AuthHero title="Time, tracked quietly." body="Your personal leave balance — on your phone, in your pocket."/>
+      <Input label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)}
+        placeholder="your@email.com" autoComplete="email"/>
+      <PasswordInput value={pw} onChange={e => setPw(e.target.value)}
+        placeholder="Your password" autoComplete="current-password" error={err}/>
+      <Btn full size="lg" type="submit" loading={loading} trailing="arrow-right">Sign in</Btn>
+
       {window.PublicKeyCredential && (
         <>
-          <div style={{ display:'flex', alignItems:'center', gap:10, margin:'18px 0' }}>
-            <div style={{ flex:1, height:1, background:C.border }}/><span style={{ fontSize:11, color:C.muted, fontWeight:600 }}>OR</span><div style={{ flex:1, height:1, background:C.border }}/>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '6px 0' }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--rule)' }}/>
+            <span className="lm-eyebrow">or</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--rule)' }}/>
           </div>
-          <Btn full variant="glass" onClick={signInWithPasskey} loading={pkLoading}>
-            <Icon n="fingerprint" size={17}/> Sign in with Passkey
+          <Btn full variant="secondary" leading="fingerprint" loading={pkLoading} onClick={signInWithPasskey}>
+            Continue with passkey
           </Btn>
         </>
       )}
-      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, marginTop:18 }}>
-        <button onClick={()=>onSwitch('forgot')} style={{ background:'none', border:'none', fontSize:13, color:C.muted, cursor:'pointer', fontWeight:500 }}>Forgot password?</button>
-        <p style={{ fontSize:13, color:C.muted, margin:0 }}>No account? <span style={{ color:C.accent, fontWeight:700, cursor:'pointer' }} onClick={()=>onSwitch('signup')}>Sign up</span></p>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+        <button type="button" onClick={() => onSwitch('forgot')}
+          style={{ background: 'none', border: 'none', fontSize: 13, color: 'var(--ink-3)', padding: 4 }}>
+          Forgot password?
+        </button>
+        <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>
+          No account? <button type="button" onClick={() => onSwitch('signup')}
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, fontSize: 13, padding: 0 }}>Sign up</button>
+        </p>
       </div>
-    </AuthCard>
+    </form>
   );
 }
 
@@ -566,7 +416,6 @@ function SignupForm({ onLogin, onSwitch }) {
   const [pw2, setPw2]     = useState('');
   const [err, setErr]     = useState('');
   const [loading, setLoad]= useState(false);
-  const [C]               = useTheme();
 
   async function submit(e) {
     e?.preventDefault?.(); setErr('');
@@ -575,33 +424,30 @@ function SignupForm({ onLogin, onSwitch }) {
     if (pw !== pw2) { setErr('Passwords do not match.'); return; }
     setLoad(true);
     try { await api.signup(email.trim(), pw, name.trim()); onLogin(); }
-    catch(e) { setErr(e.message?.includes('already exists') ? 'An account with this email already exists.' : (e.message||'Signup failed.')); }
+    catch (e) { setErr(e.message?.includes('already exists') ? 'An account with this email already exists.' : (e.message || 'Sign up failed.')); }
     finally { setLoad(false); }
   }
 
   return (
-    <AuthCard subtitle="Create your account">
-      <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <AuthInput label="Name (optional)" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoComplete="name"/>
-        <AuthInput label="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com" autoComplete="email"/>
-        <AuthInput label="Password" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password"/>
-        <AuthInput label="Confirm Password" type="password" value={pw2} onChange={e=>setPw2(e.target.value)} placeholder="Repeat password" autoComplete="new-password" error={err}/>
-        <Btn full onClick={submit} loading={loading} style={{ marginTop:6 }}>
-          Create Account <Icon n="arrow" size={16} color="#fff"/>
-        </Btn>
-      </form>
-      <p style={{ fontSize:13, color:C.muted, textAlign:'center', marginTop:18 }}>
-        Already have an account? <span style={{ color:C.accent, fontWeight:700, cursor:'pointer' }} onClick={()=>onSwitch('login')}>Sign in</span>
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <AuthHero title="Create your account." body="One account, one device. Your data stays yours."/>
+      <Input label="Name (optional)" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="name"/>
+      <Input label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" autoComplete="email"/>
+      <PasswordInput value={pw} onChange={e => setPw(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password"/>
+      <PasswordInput label="Confirm password" value={pw2} onChange={e => setPw2(e.target.value)} placeholder="Repeat password" autoComplete="new-password" error={err}/>
+      <Btn full size="lg" type="submit" loading={loading} trailing="arrow-right">Create account</Btn>
+      <p style={{ fontSize: 13, color: 'var(--ink-3)', textAlign: 'center', marginTop: 4 }}>
+        Already have an account? <button type="button" onClick={() => onSwitch('login')}
+          style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, fontSize: 13, padding: 0 }}>Sign in</button>
       </p>
-    </AuthCard>
+    </form>
   );
 }
 
 function ForgotForm({ onSwitch }) {
   const [email, setEmail] = useState('');
-  const [loading, setLoad]= useState(false);
-  const [sent, setSent]   = useState(false);
-  const [C]               = useTheme();
+  const [loading, setLoad] = useState(false);
+  const [sent, setSent] = useState(false);
 
   async function submit(e) {
     e?.preventDefault?.();
@@ -612,607 +458,672 @@ function ForgotForm({ onSwitch }) {
   }
 
   return (
-    <AuthCard subtitle="Reset your password">
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <AuthHero title="Reset your password." body="We'll send a reset link if an account exists for that email."/>
       {sent ? (
-        <div style={{ textAlign:'center', padding:'8px 0' }}>
-          <div style={{ fontSize:48, marginBottom:16, animation:'float 3s ease-in-out infinite' }}>📧</div>
-          <p style={{ color:C.text, fontWeight:700, fontSize:16, marginBottom:8 }}>Check your email</p>
-          <p style={{ color:C.muted, fontSize:13, lineHeight:1.6 }}>If an account exists for <strong>{email}</strong>, a reset link has been sent.</p>
-          <button onClick={()=>onSwitch('login')} style={{ marginTop:20, background:'none', border:'none', color:C.accent, fontWeight:700, fontSize:14, cursor:'pointer' }}>← Back to Sign In</button>
-        </div>
-      ) : (
-        <>
-          <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
-            <AuthInput label="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com" autoComplete="email"/>
-            <Btn full onClick={submit} loading={loading} style={{ marginTop:4 }}>Send Reset Link</Btn>
-          </form>
-          <p style={{ fontSize:13, color:C.muted, textAlign:'center', marginTop:18 }}>
-            <span style={{ color:C.accent, fontWeight:700, cursor:'pointer' }} onClick={()=>onSwitch('login')}>← Back to Sign In</span>
-          </p>
-        </>
-      )}
-    </AuthCard>
-  );
-}
-
-// ─── Onboarding ───────────────────────────────────────────────────────────────
-function Onboarding({ onDone }) {
-  const [step, setStep]   = useState(0);
-  const [date, setDate]   = useState('');
-  const [saving, setSave] = useState(false);
-  const [C]               = useTheme();
-
-  const slides = [
-    { emoji:'🗓️', title:'Track your leave,\nstay in control.', body:'Manage all your leave balances in one place. Know exactly how many days you have left.', color:'#6C47FF' },
-    { emoji:'💬', title:'Notify via Viber,\ninstantly.', body:'After applying for leave, the app opens Viber with a pre-filled message. One tap to send.', color:'#7360F2' },
-    { emoji:'🔄', title:'Auto-resets on\ncontract renewal.', body:'Set your contract renewal date once. Every year, all balances reset automatically.', color:'#10B981' },
-  ];
-
-  if (step < 3) {
-    const s = slides[step];
-    return (
-      <div style={{ minHeight:'100vh', background: C.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, fontFamily:"'Inter',sans-serif", position:'relative', overflow:'hidden' }}>
-        <div style={{ position:'absolute', top:'5%', right:'10%', width:180, height:180, borderRadius:'50%', background:`${s.color}10`, filter:'blur(50px)', transition:'all .5s ease', pointerEvents:'none' }}/>
-        <div style={{ width:'100%', maxWidth:360, display:'flex', flexDirection:'column', gap:32, alignItems:'center', animation:'fadeInScale .4s ease' }}>
-          <span style={{ fontSize:72, animation:'float 4s ease-in-out infinite', filter:`drop-shadow(0 8px 20px ${s.color}40)` }}>{s.emoji}</span>
-          <div style={{ textAlign:'center' }}>
-            <h1 style={{ fontSize:28, fontWeight:800, color:C.text, fontFamily:"'Cal Sans','Inter',sans-serif", whiteSpace:'pre-line', lineHeight:1.2, margin:'0 0 14px', letterSpacing:'-0.03em' }}>{s.title}</h1>
-            <p style={{ fontSize:15, color:C.textSub, lineHeight:1.7 }}>{s.body}</p>
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            {slides.map((_,i) => <div key={i} style={{ width:i===step?28:7, height:7, borderRadius:99, background:i===step?C.accent:C.border, transition:'all .4s cubic-bezier(.34,1.56,.64,1)' }}/>)}
-          </div>
-          <Btn full onClick={()=>setStep(s=>s+1)} style={{ borderRadius:16 }}>
-            {step < 2 ? 'Continue' : 'Set up my app'} <Icon n="arrow" size={16} color="#fff"/>
-          </Btn>
-          {step > 0 && <button onClick={()=>setStep(s=>s-1)} style={{ background:'none', border:'none', color:C.muted, fontSize:13, cursor:'pointer', fontFamily:"'Inter',sans-serif", fontWeight:500 }}>← Back</button>}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight:'100vh', background:C.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, fontFamily:"'Inter',sans-serif" }}>
-      <div style={{ width:'100%', maxWidth:360, display:'flex', flexDirection:'column', gap:24, animation:'fadeInScale .4s ease' }}>
-        <div style={{ textAlign:'center' }}>
-          <span style={{ fontSize:56, animation:'float 3s ease-in-out infinite', display:'inline-block' }}>📅</span>
-          <h1 style={{ fontSize:24, fontWeight:800, color:C.text, fontFamily:"'Cal Sans','Inter',sans-serif", margin:'16px 0 10px', letterSpacing:'-0.02em' }}>When does your contract renew?</h1>
-          <p style={{ fontSize:14, color:C.textSub, lineHeight:1.65 }}>Balances reset to full on this date each year.</p>
-        </div>
-        <Card style={{ padding:20 }}>
-          <TInput label="Contract Renewal Date" type="date" value={date} onChange={e=>setDate(e.target.value)}/>
-        </Card>
-        <Btn full onClick={async()=>{setSave(true);await onDone(date);setSave(false);}} loading={saving} style={{ borderRadius:16 }}>
-          Let's go <Icon n="arrow" size={16} color="#fff"/>
-        </Btn>
-        <button onClick={()=>onDone('')} style={{ background:'none', border:'none', color:C.muted, fontSize:13, cursor:'pointer', textAlign:'center', fontFamily:"'Inter',sans-serif", fontWeight:500 }}>Skip for now</button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Home Screen ──────────────────────────────────────────────────────────────
-function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismissReset }) {
-  const [C, dark] = useTheme();
-  const renewal = daysTo(settings.contractRenewal);
-  const urgent  = renewal !== null && renewal <= 30;
-  const totalUsed = leaveTypes.reduce((a,l) => a+l.used, 0);
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16, animation:'fadeIn .4s ease' }}>
-      {justReset && (
-        <div style={{ background: C.greenSoft, borderRadius:18, padding:'16px 18px', border:`1px solid ${C.green}30`, display:'flex', gap:12, alignItems:'flex-start', animation:'popIn .4s ease' }}>
-          <span style={{ fontSize:24, flexShrink:0 }}>🎉</span>
-          <div style={{ flex:1 }}>
-            <p style={{ fontWeight:700, color:C.green, fontSize:14, marginBottom:3 }}>Leave Balance Reset!</p>
-            <p style={{ fontSize:12, color:C.green, opacity:.8, lineHeight:1.55 }}>Contract renewed — all balances back to full.{settings.contractRenewal && ` Next reset: ${fmt(settings.contractRenewal)}.`}</p>
-          </div>
-          <button onClick={onDismissReset} style={{ background:'none', border:'none', cursor:'pointer', padding:2 }}><Icon n="x" size={14} color={C.green}/></button>
-        </div>
-      )}
-
-      {/* Contract renewal card */}
-      {settings.contractRenewal ? (
-        <Card style={{ padding:'16px 18px', background: urgent ? C.orangeSoft : C.surface, border:`1px solid ${urgent ? C.orange+'40' : C.border}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-            <div style={{ width:46, height:46, borderRadius:14, background: urgent ? C.orangeSoft : C.accentSoft, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-              <Icon n="cal" size={22} color={urgent ? C.orange : C.accent}/>
+        <Card pad={20} style={{ background: 'var(--accent-soft)', borderColor: 'transparent' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface)', color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icon name="mail" size={16}/>
             </div>
-            <div style={{ flex:1 }}>
-              <p style={{ fontSize:11, color:C.muted, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:3 }}>Balance resets on</p>
-              <p style={{ fontSize:16, fontWeight:700, color: urgent ? C.orange : C.text }}>{fmt(settings.contractRenewal)}</p>
-              <p style={{ fontSize:12, color: urgent ? C.orange : C.muted, marginTop:2, fontWeight:500 }}>
-                {renewal===null?'':renewal>0?`${renewal} days away`:renewal===0?'Resets today 🔄':`${Math.abs(renewal)} days overdue`}
+            <div>
+              <p style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>Check your email.</p>
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 4, lineHeight: 1.5 }}>
+                If an account exists for <strong>{email}</strong>, a reset link has been sent.
               </p>
             </div>
-            {urgent && <div style={{ width:8, height:8, borderRadius:'50%', background:C.orange, animation:'pulse 2s infinite', flexShrink:0 }}/>}
           </div>
         </Card>
       ) : (
-        <Card style={{ padding:'14px 16px', border:`1.5px dashed ${C.border}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <Icon n="info" size={16} color={C.muted}/>
-            <p style={{ fontSize:13, color:C.muted, lineHeight:1.5 }}>Set a renewal date in <strong>Settings → Contract</strong> to enable auto-reset.</p>
+        <>
+          <Input label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)}
+            placeholder="your@email.com" autoComplete="email"/>
+          <Btn full size="lg" type="submit" loading={loading}>Send reset link</Btn>
+        </>
+      )}
+      <p style={{ fontSize: 13, color: 'var(--ink-3)', textAlign: 'center', marginTop: 4 }}>
+        <button type="button" onClick={() => onSwitch('login')}
+          style={{ background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 600, fontSize: 13, padding: 0 }}>← Back to sign in</button>
+      </p>
+    </form>
+  );
+}
+
+// ─── Onboarding ──────────────────────────────────────────────────────────────
+function Onboarding({ onDone }) {
+  const [date, setDate] = useState('');
+  const [saving, setSave] = useState(false);
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--paper)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, maxWidth: 420, margin: '0 auto', width: '100%', padding: 'calc(env(safe-area-inset-top, 0px) + 32px) 24px calc(env(safe-area-inset-bottom, 0px) + 24px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 24 }}>
+        <div>
+          <div className="lm-eyebrow" style={{ marginBottom: 10 }}>Step 1 of 1</div>
+          <h1 className="lm-display" style={{ fontSize: 36, lineHeight: 1.05, margin: 0, letterSpacing: '-0.025em' }}>
+            When does your contract renew?
+          </h1>
+          <p style={{ marginTop: 14, fontSize: 15, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+            Your balances reset to full on this date, each year.
+          </p>
+          <div style={{ marginTop: 24 }}>
+            <Input label="Renewal date" type="date" value={date} onChange={e => setDate(e.target.value)}/>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Btn full size="lg" trailing="arrow-right" loading={saving}
+            onClick={async () => { setSave(true); await onDone(date); setSave(false); }}>
+            Continue
+          </Btn>
+          <Btn full variant="ghost" onClick={() => onDone('')}>Skip for now</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Home ────────────────────────────────────────────────────────────────────
+function BalanceCard({ type }) {
+  const remaining = Math.max(0, type.total - type.used);
+  const pct = type.total ? type.used / type.total : 0;
+  const tone = remaining === 0 ? 'danger' : pct > 0.7 ? 'warn' : 'ok';
+  const numColor = tone === 'danger' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn)' : 'var(--ink)';
+  const barColor = tone === 'danger' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn)' : 'var(--accent)';
+  const meta = remaining === 0 ? 'Used up' : tone === 'warn' ? 'Running low' : `${type.used} used`;
+  return (
+    <Card pad={18} style={{ flex: 1, minWidth: 0 }}>
+      <div className="lm-eyebrow" style={{ marginBottom: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{type.name}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 10 }}>
+        <span style={{ fontFamily: 'var(--ff-display)', fontSize: 48, lineHeight: 0.95, letterSpacing: '-0.03em', color: numColor }}>{remaining}</span>
+        <span className="lm-num" style={{ fontSize: 12, color: 'var(--ink-3)' }}>/ {type.total}</span>
+      </div>
+      <div style={{ height: 3, borderRadius: 99, background: 'var(--paper-2)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${Math.min(100, pct * 100)}%`, background: barColor, transition: 'width 600ms var(--ease-out)' }}/>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, color: tone === 'ok' ? 'var(--ink-3)' : numColor, fontFamily: 'var(--ff-text)' }}>
+        {meta}
+      </div>
+    </Card>
+  );
+}
+
+function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismissReset }) {
+  const renewal = daysTo(settings.contractRenewal);
+  const urgent = renewal !== null && renewal <= 30;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {justReset && (
+        <Card pad={14} style={{ background: 'var(--ok-soft)', borderColor: 'transparent' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--surface)', color: 'var(--ok)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icon name="check" size={14}/>
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>Balances reset for your new contract year.</p>
+              {settings.contractRenewal && (
+                <p className="lm-meta" style={{ fontSize: 12, marginTop: 2 }}>Next reset: {fmt(settings.contractRenewal)}.</p>
+              )}
+            </div>
+            <button onClick={onDismissReset} aria-label="Dismiss" style={{ background: 'transparent', border: 0, color: 'var(--ink-3)', padding: 4, alignSelf: 'flex-start' }}>
+              <Icon name="x" size={14}/>
+            </button>
           </div>
         </Card>
       )}
 
-      {/* Leave balances */}
-      <Card style={{ padding:'20px 18px' }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
-          <h2 style={{ fontSize:13, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', margin:0 }}>Leave Balances</h2>
-          {totalUsed > 0 && <span style={{ fontSize:12, color:C.muted, fontWeight:500 }}>{totalUsed} day{totalUsed!==1?'s':''} used</span>}
-        </div>
-        {leaveTypes.length === 0
-          ? <p style={{ color:C.muted, fontSize:13, textAlign:'center', padding:'16px 0' }}>Add leave types in Settings.</p>
-          : <div style={{ display:'flex', flexWrap:'wrap', gap:20, justifyContent:'space-around' }}>
-              {leaveTypes.map((lt,i) => <Ring key={lt.id} name={lt.name} total={lt.total} used={lt.used} color={lt.color} style={{ animationDelay:`${i*80}ms` }}/>)}
+      {settings.contractRenewal ? (
+        <Card pad={16} style={{ background: 'var(--paper-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--rule)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: urgent ? 'var(--warn)' : 'var(--ink-2)' }}>
+              <Icon name="rotate-ccw" size={16}/>
             </div>
-        }
-      </Card>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="lm-eyebrow" style={{ marginBottom: 2 }}>Next reset</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {fmt(settings.contractRenewal)}{' '}
+                <span className="lm-num" style={{ color: urgent ? 'var(--warn)' : 'var(--ink-3)', fontWeight: 400, fontSize: 12 }}>
+                  · {renewal === null ? '' : renewal > 0 ? `${renewal}d away` : renewal === 0 ? 'today' : `${Math.abs(renewal)}d overdue`}
+                </span>
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : (
+        <Card pad={14} style={{ borderStyle: 'dashed' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Icon name="info" size={16} style={{ color: 'var(--ink-3)' }}/>
+            <p className="lm-meta" style={{ fontSize: 13 }}>Set a renewal date in <strong style={{ color: 'var(--ink)' }}>Settings → Contract</strong> to enable auto-reset.</p>
+          </div>
+        </Card>
+      )}
 
-      {/* Apply CTA */}
-      <button onClick={onApply} style={{
-        background: C.accentGrad,
-        border:'none', borderRadius:20, padding:'18px',
-        cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:10,
-        boxShadow:`0 8px 30px ${C.accentSoft}`,
-        fontSize:16, fontWeight:700, color:'#fff',
-        fontFamily:"'Inter',sans-serif",
-        transition:'all .2s cubic-bezier(.34,1.56,.64,1)',
-        letterSpacing:'-0.01em',
-        backgroundSize:'200% 200%',
-        animation:'gradShift 4s ease infinite',
-      }}>
-        <Icon n="plus" size={22} color="#fff"/> Apply for Leave
-      </button>
+      {leaveTypes.length > 0 && (
+        <div>
+          <div className="lm-eyebrow" style={{ marginBottom: 10 }}>Balances</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {leaveTypes.map(t => <BalanceCard key={t.id} type={t}/>)}
+          </div>
+        </div>
+      )}
 
-      {/* Recent */}
+      <Btn full size="lg" leading="plus" onClick={onApply}>Apply for leave</Btn>
+
       {history.length > 0 && (
         <div>
-          <h2 style={{ fontSize:13, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:12 }}>Recent</h2>
-          {history.slice(0,3).map((h,i) => <HistoryRow key={h.id} item={h} style={{ animationDelay:`${i*60}ms` }}/>)}
+          <div className="lm-eyebrow" style={{ marginBottom: 10 }}>Recent</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {history.slice(0, 3).map(h => <HistoryRow key={h.id} item={h}/>)}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// ─── History Row ──────────────────────────────────────────────────────────────
-function HistoryRow({ item, onDelete, onViber, style:sx }) {
-  const [C] = useTheme();
-  const color = item.typeColor || item.type_color;
-  const name  = item.typeName  || item.type_name;
-  const sd    = item.startDate || item.start_date;
-  const ed    = item.endDate   || item.end_date;
-  const { reason: reasonText, urgentTask } = splitReason(item.reason);
+function HistoryRow({ item, onCancel, busy }) {
+  const name = item.typeName || item.type_name;
+  const sd = item.startDate || item.start_date;
+  const ed = item.endDate || item.end_date;
   return (
-    <div style={{
-      background:C.surface, borderRadius:16, padding:'14px 16px',
-      border:`1px solid ${C.border}`, marginBottom:10,
-      display:'flex', alignItems:'center', gap:13,
-      boxShadow:C.shadow, animation:'fadeIn .4s ease both',
-      transition:'all .2s ease', ...(sx||{})
-    }}>
-      <div style={{ width:42, height:42, borderRadius:13, background:`${color}18`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-        <Icon n="cal" size={20} color={color}/>
+    <Card pad={14} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--paper-2)', color: 'var(--ink-2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icon name="calendar" size={16}/>
       </div>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:3 }}>
-          <span style={{ fontWeight:700, fontSize:14, color:C.text }}>{name}</span>
-          <Pill color={color} label={`${item.days}d`}/>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>{name}</span>
+          <Pill tone="accent">{item.days}d</Pill>
         </div>
-        <p style={{ fontSize:12, color:C.muted, fontWeight:500 }}>{fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''}</p>
-        {reasonText && <p style={{ fontSize:11, color:C.muted, marginTop:2, fontStyle:'italic', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', opacity:.7 }}>"{reasonText}"</p>}
-        {urgentTask && <p style={{ fontSize:11, color:C.orange, marginTop:2, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>⚡ {urgentTask}</p>}
+        <div className="lm-meta" style={{ fontSize: 12 }}>
+          {fmt(sd)}{sd !== ed ? ` → ${fmt(ed)}` : ''}
+        </div>
+        {item.reason && (
+          <div className="lm-meta" style={{ fontSize: 12, marginTop: 2, fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            "{item.reason}"
+          </div>
+        )}
       </div>
-      {onViber && (
-        <button onClick={e=>{e.stopPropagation();onViber(item);}} style={{ background:`rgba(115,96,242,0.10)`, border:`1px solid ${C.viber}30`, cursor:'pointer', padding:'7px 8px', borderRadius:10, flexShrink:0, transition:'all .15s' }}>
-          <Icon n="viber" size={15} color={C.viber}/>
+      {onCancel && (
+        <button onClick={() => onCancel(item.id)} aria-label="Cancel leave" disabled={busy}
+          style={{ background: 'transparent', border: 0, color: 'var(--ink-3)', padding: 6, opacity: busy ? 0.4 : 1 }}>
+          <Icon name="trash-2" size={16}/>
         </button>
       )}
-      {onDelete && (
-        <button onClick={()=>onDelete(item.id)} style={{ background:C.faint, border:`1px solid ${C.border}`, cursor:'pointer', padding:'7px 8px', borderRadius:10, flexShrink:0, transition:'all .15s' }}>
-          <Icon n="trash" size={15} color={C.muted}/>
-        </button>
-      )}
-    </div>
+    </Card>
   );
 }
 
-// ─── Apply Success + Viber ────────────────────────────────────────────────────
-function ApplySuccess({ entry, links, onSuccess }) {
-  const [C] = useTheme();
-  const [sentIds, setSentIds] = useState(new Set());
-  const [queue,   setQueue]   = useState([]);
-  const queueRef = useRef([]);
-  queueRef.current = queue;
-  const sd = entry.startDate||entry.start_date, ed = entry.endDate||entry.end_date;
+// ─── Apply ───────────────────────────────────────────────────────────────────
+function ApplySuccess({ entry, links, onClose }) {
+  const sd = entry.startDate || entry.start_date;
+  const ed = entry.endDate || entry.end_date;
+  const typeName = entry.typeName || entry.type_name;
 
-  // Auto-open first recipient 800ms after mount
   useEffect(() => {
     if (links.length > 0) {
-      const t = setTimeout(() => {
-        setSentIds(new Set([links[0].id]));
-        window.location.href = links[0].viberUrl;
-      }, 800);
+      const t = setTimeout(() => { window.location.href = links[0].viberUrl; }, 300);
       return () => clearTimeout(t);
     }
   }, []);
 
-  // When user returns from Viber, auto-open next queued recipient
-  useEffect(() => {
-    function onVisible() {
-      if (document.visibilityState !== 'visible') return;
-      const q = queueRef.current;
-      if (!q.length) return;
-      const [next, ...rest] = q;
-      setQueue(rest);
-      setTimeout(() => {
-        setSentIds(prev => new Set([...prev, next.id]));
-        window.location.href = next.viberUrl;
-      }, 800);
-    }
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, []);
-
-  function openViber(url, id) { setSentIds(prev => new Set([...prev, id])); window.location.href = url; }
-
-  function notifyAll() {
-    const unsent = links.filter(lk => !sentIds.has(lk.id));
-    if (!unsent.length) return;
-    const [first, ...rest] = unsent;
-    setQueue(rest);
-    setSentIds(prev => new Set([...prev, first.id]));
-    window.location.href = first.viberUrl;
-  }
-
-  const sentCount = links.filter(lk => sentIds.has(lk.id)).length;
-  const allSent   = links.length > 0 && sentCount === links.length;
-
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <div style={{ background:C.greenSoft, borderRadius:16, padding:'16px 18px', border:`1px solid ${C.green}30`, display:'flex', gap:12, alignItems:'center', animation:'popIn .4s ease' }}>
-        <Icon n="check" size={24} color={C.green}/>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--ok-soft)', color: 'var(--ok)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="check" size={16}/>
+        </div>
         <div>
-          <p style={{ fontWeight:700, color:C.green, fontSize:14 }}>Leave Submitted!</p>
-          <p style={{ color:C.green, opacity:.8, fontSize:12, marginTop:2 }}>
-            {entry.typeName||entry.type_name} · {entry.days} day{entry.days>1?'s':''} · {fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''}
-          </p>
+          <h2 className="lm-h2" style={{ margin: 0, fontSize: 24 }}>Leave submitted.</h2>
+          <div className="lm-meta" style={{ marginTop: 2 }}>
+            {typeName} · {entry.days} day{entry.days > 1 ? 's' : ''} · {fmt(sd)}{sd !== ed ? ` → ${fmt(ed)}` : ''}
+          </div>
         </div>
       </div>
 
       {links.length > 0 ? (
         <>
-          {allSent ? (
-            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:C.greenSoft, borderRadius:12, border:`1px solid ${C.green}30`, animation:'fadeIn .3s ease' }}>
-              <Icon n="check" size={16} color={C.green}/>
-              <p style={{ fontSize:13, color:C.green, fontWeight:600 }}>All {links.length} contact{links.length>1?'s':''} notified!</p>
-            </div>
-          ) : sentCount === 0 ? (
-            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'rgba(115,96,242,0.08)', borderRadius:12, border:`1px solid ${C.viber}25`, animation:'fadeIn .3s ease' }}>
-              <div style={{ width:8, height:8, borderRadius:'50%', background:C.viber, animation:'pulse 1.5s infinite', flexShrink:0 }}/>
-              <p style={{ fontSize:13, color:C.viber, fontWeight:600 }}>Opening Viber for {links[0].recipientName}…</p>
-            </div>
-          ) : null}
-
-          <Card style={{ padding:'13px 16px', background:C.faint }}>
-            <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Message Preview</p>
-            <p style={{ fontSize:13, color:C.textSub, lineHeight:1.6, whiteSpace:'pre-wrap' }}>{links[0].messagePreview}</p>
+          <Card pad={14} style={{ background: 'var(--paper-2)' }}>
+            <div className="lm-eyebrow" style={{ marginBottom: 6 }}>Message preview</div>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+              {links[0].messagePreview}
+            </p>
           </Card>
-
-          {links.length > 1 && !allSent && (
-            <Btn full variant="viber" onClick={notifyAll}>
-              <Icon n="viber" size={16} color="#fff"/>
-              {sentCount > 0 ? `Continue Notifying (${sentCount}/${links.length} done)` : `Notify All (${links.length} contacts)`}
-            </Btn>
-          )}
-
-          {links.map(lk => {
-            const sent = sentIds.has(lk.id);
-            return (
-              <button key={lk.id} onClick={() => openViber(lk.viberUrl, lk.id)}
-                style={{ display:'block', width:'100%', background:'none', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}>
-                <Card style={{ padding:'14px 16px', background: sent ? C.greenSoft : 'linear-gradient(135deg,rgba(115,96,242,0.12),rgba(155,139,255,0.10))', border:`1.5px solid ${sent ? C.green+'40' : C.viber+'50'}`, transition:'all .2s ease' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                    <div style={{ width:46, height:46, borderRadius:14, background: sent ? C.greenSoft : 'linear-gradient(135deg,#7360F2,#9B8BFF)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow: sent ? 'none' : '0 4px 12px rgba(115,96,242,0.35)' }}>
-                      <Icon n={sent ? 'check' : 'viber'} size={22} color={sent ? C.green : '#fff'}/>
-                    </div>
-                    <div style={{ flex:1 }}>
-                      <p style={{ fontWeight:700, color: sent ? C.green : C.viber, fontSize:15 }}>{lk.recipientName}</p>
-                      <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{lk.phone}</p>
-                    </div>
-                    <div style={{ background: sent ? C.green : C.viber, borderRadius:10, padding:'6px 14px' }}>
-                      <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{sent ? '✓ Sent' : 'Open →'}</span>
-                    </div>
-                  </div>
-                </Card>
-              </button>
-            );
-          })}
+          <div className="lm-eyebrow">Notify via Viber</div>
+          {links.map(lk => (
+            <Card key={lk.id} pad={14} onClick={() => { window.location.href = lk.viberUrl; }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--viber-soft)', color: 'var(--viber)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon name="message-circle" size={16}/>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lk.recipientName}</div>
+                <div className="lm-num" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{lk.phone}</div>
+              </div>
+              <div style={{ color: 'var(--accent)' }}><Icon name="arrow-right" size={16}/></div>
+            </Card>
+          ))}
         </>
       ) : (
-        <Card style={{ padding:'14px 16px', border:`1.5px dashed ${C.border}`, textAlign:'center' }}>
-          <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>No Viber recipients yet.<br/>Add them in <strong>Settings → Viber</strong>.</p>
+        <Card pad={14} style={{ borderStyle: 'dashed' }}>
+          <p className="lm-meta" style={{ fontSize: 13 }}>
+            No Viber recipients yet. Add them in <strong style={{ color: 'var(--ink)' }}>Settings → Viber</strong>.
+          </p>
         </Card>
       )}
-      <Btn full variant="ghost" onClick={onSuccess} style={{ marginTop:4 }}>Done</Btn>
+
+      <Btn full variant="secondary" onClick={onClose}>Done</Btn>
     </div>
   );
 }
 
-// ─── Apply Form ───────────────────────────────────────────────────────────────
-function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast, onTitleChange }) {
-  const [C] = useTheme();
-  const t = today();
-  const [form, setForm]   = useState({ typeId:leaveTypes[0]?.id||'', start:t, end:t, reason:'', urgentTask:'' });
-  const [sub, setSub]     = useState(false);
-  const [links, setLinks] = useState(null);
+function ApplyScreen({ leaveTypes, recipients, onClose, onSuccess, toast }) {
+  const t0 = today();
+  const [typeId, setTypeId] = useState(leaveTypes[0]?.id || '');
+  const [start, setStart] = useState(t0);
+  const [end, setEnd] = useState(t0);
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [entry, setEntry] = useState(null);
-  const set = (k,v) => setForm(p=>({...p,[k]:v}));
+  const [links, setLinks] = useState(null);
 
-  useEffect(() => {
-    if (entry && links !== null) onTitleChange?.('Leave Submitted 🎉');
-  }, [entry, links]);
-
-  const sel    = leaveTypes.find(l=>l.id===form.typeId);
-  const days   = form.start && form.end ? weekdays(form.start, form.end) : 0;
-  const remain = sel ? sel.total - sel.used : 0;
-  const over   = days > remain;
+  const sel = leaveTypes.find(l => l.id === typeId);
+  const days = (start && end) ? weekdays(start, end) : 0;
+  const remain = sel ? Math.max(0, sel.total - sel.used) : 0;
+  const over = days > remain;
 
   async function submit() {
-    if (!sel||days<=0||over) return;
-    if (!form.reason.trim()) { toast?.('Reason is required.', 'error'); return; }
-    setSub(true);
+    if (!sel || days <= 0 || over) return;
+    setSubmitting(true);
     try {
-      const newEntry = await api.applyLeave({ leaveTypeId:form.typeId, startDate:form.start, endDate:form.end, reason:form.reason, urgentTask:form.urgentTask });
+      const newEntry = await api.applyLeave({ leaveTypeId: typeId, startDate: start, endDate: end, reason });
       setEntry(newEntry);
       if (recipients.length > 0) {
-        const { links:vl } = await api.getViberLinks(newEntry.id);
+        const { links: vl } = await api.getViberLinks(newEntry.id);
         setLinks(vl);
       } else { setLinks([]); }
-    } catch(err) { toast?.(err.message, 'error'); }
-    finally { setSub(false); }
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setSubmitting(false); }
   }
 
   if (leaveTypes.length === 0) return (
-    <p style={{ textAlign:'center', color:C.muted, fontSize:14, lineHeight:1.7, padding:'20px 0' }}>
-      No leave types configured.<br/>Go to <strong>Settings → Leave Types</strong>.
-    </p>
+    <div style={{ padding: 8 }}>
+      <Card pad={20} style={{ borderStyle: 'dashed', textAlign: 'center' }}>
+        <p className="lm-meta" style={{ fontSize: 13, lineHeight: 1.6 }}>
+          No leave types configured. Go to <strong style={{ color: 'var(--ink)' }}>Settings → Leaves</strong>.
+        </p>
+      </Card>
+    </div>
   );
 
-  if (entry && links !== null) {
-    return <ApplySuccess entry={entry} links={links} onSuccess={onSuccess}/>;
-  }
+  if (entry && links !== null) return <ApplySuccess entry={entry} links={links} onClose={onSuccess}/>;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      <SelInput label="Leave Type" value={form.typeId} onChange={e=>set('typeId',e.target.value)}>
-        {leaveTypes.map(l => <option key={l.id} value={l.id}>{l.name} — {l.total-l.used} day{l.total-l.used!==1?'s':''} remaining</option>)}
-      </SelInput>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-        <TInput label="Start Date" type="date" value={form.start} min={t} onChange={e=>{set('start',e.target.value);if(e.target.value>form.end)set('end',e.target.value);}}/>
-        <TInput label="End Date" type="date" value={form.end} min={form.start} onChange={e=>set('end',e.target.value)}/>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Select label="Leave type" value={typeId} onChange={e => setTypeId(e.target.value)}>
+        {leaveTypes.map(l => (
+          <option key={l.id} value={l.id}>
+            {l.name} — {Math.max(0, l.total - l.used)} day{(l.total - l.used) !== 1 ? 's' : ''} left
+          </option>
+        ))}
+      </Select>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Input label="Start" type="date" value={start} min={t0}
+          onChange={e => { setStart(e.target.value); if (e.target.value > end) setEnd(e.target.value); }}/>
+        <Input label="End" type="date" value={end} min={start} onChange={e => setEnd(e.target.value)}/>
       </div>
       {days > 0 && (
-        <Card style={{ padding:'12px 16px', background: over ? C.redSoft : C.accentSoft, border:`1px solid ${over ? C.red : C.accent}30` }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span style={{ fontSize:14, fontWeight:700, color: over ? C.red : C.accent }}>{days} working day{days!==1?'s':''}</span>
-            {over && <span style={{ fontSize:12, color:C.red, fontWeight:600 }}>Only {remain} day{remain!==1?'s':''} left</span>}
+        <Card pad={14} style={{
+          background: over ? 'var(--danger-soft)' : 'var(--accent-soft)',
+          borderColor: 'transparent',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontWeight: 600, fontSize: 14, color: over ? 'var(--danger)' : 'var(--accent)' }}>
+              {days} working day{days > 1 ? 's' : ''}
+            </span>
+            {over && <span style={{ fontSize: 12, color: 'var(--danger)' }}>Only {remain} left</span>}
           </div>
         </Card>
       )}
-      <TInput label="Reason *" value={form.reason} placeholder="e.g. Medical, sick, vacation…" onChange={e=>set('reason',e.target.value)}/>
-      <TInput label="Urgent Task (optional)" value={form.urgentTask} placeholder="e.g. Submit report by Friday" onChange={e=>set('urgentTask',e.target.value)}/>
-      <Btn full onClick={submit} disabled={days<=0||over||!form.reason.trim()} loading={sub} style={{ marginTop:4, padding:16, fontSize:16, borderRadius:16 }}>
-        Submit Leave
+      <Input label="Reason (optional)" value={reason} onChange={e => setReason(e.target.value)}
+        placeholder="Family trip, medical…"/>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <Btn variant="secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
+        <Btn onClick={submit} disabled={days <= 0 || over} loading={submitting} style={{ flex: 2 }}>Submit</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ─── History ─────────────────────────────────────────────────────────────────
+function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
+  const [filter, setFilter] = useState('all');
+  const [busy, setBusy] = useState(null);
+
+  async function cancel(id) {
+    setBusy(id);
+    try { await api.cancelLeave(id); toast('Leave cancelled. Your balance is restored.'); onRefresh(); }
+    catch (err) { toast(err.message, 'error'); }
+    finally { setBusy(null); }
+  }
+
+  const filtered = filter === 'all'
+    ? history
+    : history.filter(h => (h.leaveTypeId || h.leave_type_id) === filter);
+
+  if (history.length === 0) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '60px 20px', textAlign: 'center' }}>
+      <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--paper-2)', color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="clock" size={28}/>
+      </div>
+      <div>
+        <p style={{ fontSize: 15, fontWeight: 600 }}>No leave history yet.</p>
+        <p className="lm-meta" style={{ fontSize: 13, marginTop: 4 }}>Apply for your first leave to see it here.</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Card pad={16}>
+        <div className="lm-eyebrow" style={{ marginBottom: 12 }}>Period summary</div>
+        {leaveTypes.map(lt => {
+          const pct = lt.total > 0 ? Math.min(100, (lt.used / lt.total) * 100) : 0;
+          return (
+            <div key={lt.id} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>{lt.name}</span>
+                <span className="lm-num" style={{ fontSize: 13, color: 'var(--ink)' }}>{lt.used} / {lt.total}d</span>
+              </div>
+              <div style={{ height: 3, borderRadius: 99, background: 'var(--paper-2)', overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 99, background: 'var(--accent)', width: `${pct}%`, transition: 'width 600ms var(--ease-out)' }}/>
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      {leaveTypes.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
+          {[{ id: 'all', name: 'All' }, ...leaveTypes].map(opt => {
+            const active = filter === opt.id;
+            return (
+              <button key={opt.id} onClick={() => setFilter(opt.id)} style={{
+                padding: '6px 12px', borderRadius: 999,
+                border: `1px solid ${active ? 'var(--accent)' : 'var(--rule)'}`,
+                background: active ? 'var(--accent-soft)' : 'var(--surface)',
+                color: active ? 'var(--accent)' : 'var(--ink-2)',
+                fontSize: 12, fontWeight: 600, fontFamily: 'var(--ff-text)',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}>{opt.name}</button>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="lm-meta" style={{ fontSize: 12 }}>Cancel a leave to restore its balance.</p>
+
+      {filtered.length === 0
+        ? <p style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, padding: '20px 0' }}>No entries for this filter.</p>
+        : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {filtered.map(h => <HistoryRow key={h.id} item={h} onCancel={cancel} busy={busy === h.id}/>)}
+          </div>
+      }
+    </div>
+  );
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+function SettingsScreen({ leaveTypes, recipients, settings, onRefresh, onLogout, toast }) {
+  const [tab, setTab] = useState('leaves');
+  const tabs = [['leaves', 'Leaves'], ['viber', 'Viber'], ['contract', 'Contract'], ['account', 'Account']];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', gap: 4, background: 'var(--paper-2)', padding: 4, borderRadius: 10 }}>
+        {tabs.map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{
+            flex: 1, border: 0, background: tab === id ? 'var(--surface)' : 'transparent',
+            color: tab === id ? 'var(--ink)' : 'var(--ink-3)',
+            padding: '8px 4px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+            fontFamily: 'var(--ff-text)',
+            boxShadow: tab === id ? 'var(--shadow-1)' : 'none',
+            transition: 'background var(--dur), color var(--dur)',
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {tab === 'leaves' && <LeaveTypesTab leaveTypes={leaveTypes} onRefresh={onRefresh} toast={toast}/>}
+      {tab === 'viber' && <RecipientsTab recipients={recipients} onRefresh={onRefresh} toast={toast}/>}
+      {tab === 'contract' && <ContractTab settings={settings} onRefresh={onRefresh} toast={toast}/>}
+      {tab === 'account' && <AccountTab onLogout={onLogout} toast={toast}/>}
+    </div>
+  );
+}
+
+const iconMiniStyle = {
+  width: 28, height: 28, borderRadius: 8,
+  background: 'var(--paper-2)', border: '1px solid var(--rule)',
+  color: 'var(--ink-2)',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+};
+
+function LeaveTypesTab({ leaveTypes, onRefresh, toast }) {
+  const [editing, setEditing] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save(vals) {
+    setBusy(true);
+    try {
+      if (editing.id) {
+        await api.updateLeaveType(editing.id, { name: vals.name, total: Number(vals.total), color: editing.color || '#0F5F55' });
+        toast('Leave type updated.');
+      } else {
+        await api.addLeaveType({ name: vals.name, total: Number(vals.total), color: '#0F5F55' });
+        toast('Leave type added.');
+      }
+      setEditing(null);
+      onRefresh();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setBusy(false); }
+  }
+
+  async function remove(id) {
+    try { await api.deleteLeaveType(id); toast('Leave type deleted.'); onRefresh(); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {leaveTypes.map(lt => (
+        <Card key={lt.id} pad={16}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ flex: 1, fontWeight: 600, fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lt.name}</span>
+            <button style={iconMiniStyle} onClick={() => setEditing({ id: lt.id, name: lt.name, total: lt.total, color: lt.color })} aria-label="Edit">
+              <Icon name="pencil" size={14}/>
+            </button>
+            <button style={iconMiniStyle} onClick={() => setConfirm({
+              msg: `Delete "${lt.name}" leave type? History entries will stay.`,
+              confirmLabel: 'Delete', danger: true,
+              onConfirm: () => remove(lt.id),
+            })} aria-label="Delete">
+              <Icon name="trash-2" size={14}/>
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
+            <span className="lm-meta" style={{ fontSize: 12 }}>Total <b style={{ color: 'var(--ink)' }}>{lt.total}d</b></span>
+            <span className="lm-meta" style={{ fontSize: 12 }}>Used <b style={{ color: 'var(--ink)' }}>{lt.used}d</b></span>
+            <span className="lm-meta" style={{ fontSize: 12 }}>Left <b style={{ color: 'var(--ink)' }}>{Math.max(0, lt.total - lt.used)}d</b></span>
+          </div>
+        </Card>
+      ))}
+      {leaveTypes.length === 0 && (
+        <Card pad={20} style={{ textAlign: 'center', background: 'var(--paper-2)' }}>
+          <p className="lm-meta" style={{ fontSize: 13 }}>No leave types yet.</p>
+        </Card>
+      )}
+      <Btn variant="secondary" full leading="plus" onClick={() => setEditing({ name: '', total: 10 })}>
+        Add leave type
+      </Btn>
+
+      {editing && (
+        <LeaveTypeSheet initial={editing} onClose={() => setEditing(null)} onSave={save} busy={busy}/>
+      )}
+      {confirm && <ConfirmSheet {...confirm} onClose={() => setConfirm(null)}/>}
+    </div>
+  );
+}
+
+function LeaveTypeSheet({ initial, onClose, onSave, busy }) {
+  const [name, setName] = useState(initial.name || '');
+  const [total, setTotal] = useState(initial.total ?? 10);
+  const canSave = name.trim().length > 0 && Number(total) > 0;
+  return (
+    <Sheet title={initial.id ? 'Edit leave type' : 'Add leave type'} onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Input label="Name" placeholder="e.g. Annual, Sick…" value={name}
+          onChange={e => setName(e.target.value)} autoFocus/>
+        <Input label="Total days per year" type="number" min="1" value={total}
+          onChange={e => setTotal(e.target.value)}/>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <Btn variant="secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={() => onSave({ name: name.trim(), total })} disabled={!canSave} loading={busy} style={{ flex: 2 }}>
+            {initial.id ? 'Save' : 'Add'}
+          </Btn>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function RecipientsTab({ recipients, onRefresh, toast }) {
+  const [editing, setEditing] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save(vals) {
+    setBusy(true);
+    try {
+      await api.addRecipient(vals);
+      toast('Contact added.');
+      setEditing(null);
+      onRefresh();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setBusy(false); }
+  }
+
+  async function remove(id) {
+    try { await api.deleteRecipient(id); toast('Contact removed.'); onRefresh(); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <Card pad={14} style={{ background: 'var(--viber-soft)', borderColor: 'transparent' }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--viber)', lineHeight: 1.5 }}>
+          After applying, the app opens Viber with a pre-filled message. One tap to send.
+        </p>
+      </Card>
+      {recipients.map(c => (
+        <Card key={c.id} pad={14} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--viber-soft)', color: 'var(--viber)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Icon name="user" size={16}/>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+            <div className="lm-num" style={{ fontSize: 12, color: 'var(--ink-3)' }}>{c.phone}</div>
+          </div>
+          <button style={iconMiniStyle} onClick={() => setConfirm({
+            msg: `Remove ${c.name}?`,
+            confirmLabel: 'Remove', danger: true,
+            onConfirm: () => remove(c.id),
+          })} aria-label="Remove">
+            <Icon name="trash-2" size={14}/>
+          </button>
+        </Card>
+      ))}
+      {recipients.length === 0 && (
+        <Card pad={20} style={{ textAlign: 'center', background: 'var(--paper-2)' }}>
+          <p className="lm-meta" style={{ fontSize: 13 }}>No contacts yet. Add your manager or HR.</p>
+        </Card>
+      )}
+      <Btn variant="secondary" full leading="plus" onClick={() => setEditing({ name: '', phone: '' })}>
+        Add contact
+      </Btn>
+
+      {editing && <ContactSheet initial={editing} onClose={() => setEditing(null)} onSave={save} busy={busy}/>}
+      {confirm && <ConfirmSheet {...confirm} onClose={() => setConfirm(null)}/>}
+    </div>
+  );
+}
+
+function ContactSheet({ initial, onClose, onSave, busy }) {
+  const [name, setName] = useState(initial.name || '');
+  const [phone, setPhone] = useState(initial.phone || '');
+  const canSave = name.trim().length > 0 && phone.trim().length > 0;
+  return (
+    <Sheet title={initial.id ? 'Edit contact' : 'Add contact'} onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Input label="Name" placeholder="e.g. Zaha (manager)" value={name}
+          onChange={e => setName(e.target.value)} autoFocus/>
+        <Input label="Viber phone number" placeholder="+960 ..." value={phone}
+          onChange={e => setPhone(e.target.value)}
+          helper="Must include country code for the Viber deep-link."/>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <Btn variant="secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={() => onSave({ name: name.trim(), phone: phone.trim() })}
+            disabled={!canSave} loading={busy} style={{ flex: 2 }}>
+            {initial.id ? 'Save' : 'Add'}
+          </Btn>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function ContractTab({ settings, onRefresh, toast }) {
+  const [date, setDate] = useState(settings.contractRenewal || '');
+  const [saving, setSaving] = useState(false);
+  const saved = date === (settings.contractRenewal || '');
+  const days = daysTo(date);
+
+  async function save() {
+    setSaving(true);
+    try { await api.updateSettings({ contractRenewal: date }); toast('Renewal date saved.'); onRefresh(); }
+    catch (err) { toast(err.message, 'error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Card pad={14} style={{ background: 'var(--accent-soft)', borderColor: 'transparent' }}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--accent)', lineHeight: 1.5 }}>
+          On the renewal date, all balances reset to full and the date advances by one year.
+        </p>
+      </Card>
+      <Input label="Next renewal date" type="date" value={date} onChange={e => setDate(e.target.value)}/>
+      {date && days !== null && (
+        <Card pad={12} style={{ background: days <= 30 ? 'var(--warn-soft)' : 'var(--paper-2)', borderColor: 'transparent' }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: days <= 30 ? 'var(--warn)' : 'var(--ink-2)' }}>
+            {days > 0 ? `${days} days until reset` : days === 0 ? 'Resets today.' : `${Math.abs(days)} days overdue`}
+          </p>
+        </Card>
+      )}
+      {settings.lastResetDate && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--paper-2)', borderRadius: 10 }}>
+          <Icon name="rotate-ccw" size={14} style={{ color: 'var(--ink-3)' }}/>
+          <p className="lm-meta" style={{ fontSize: 12 }}>Last reset: <strong style={{ color: 'var(--ink)' }}>{fmt(settings.lastResetDate)}</strong></p>
+        </div>
+      )}
+      <Btn full onClick={save} disabled={saved || saving} loading={saving}>
+        {saved ? 'Saved' : 'Save'}
       </Btn>
     </div>
   );
 }
 
-// ─── History Viber Sheet ──────────────────────────────────────────────────────
-function HistoryViberSheet({ entry, onClose }) {
-  const [C] = useTheme();
-  const [links,   setLinks]   = useState(null);
-  const [sentIds, setSentIds] = useState(new Set());
-  const [queue,   setQueue]   = useState([]);
-  const queueRef = useRef([]);
-  queueRef.current = queue;
-
-  const sd    = entry.start_date || entry.startDate;
-  const ed    = entry.end_date   || entry.endDate;
-  const color = entry.type_color || entry.typeColor;
-  const name  = entry.type_name  || entry.typeName;
-
-  useEffect(() => {
-    api.getViberLinks(entry.id)
-      .then(r => setLinks(r.links))
-      .catch(() => setLinks([]));
-  }, [entry.id]);
-
-  useEffect(() => {
-    function onVisible() {
-      if (document.visibilityState !== 'visible') return;
-      const q = queueRef.current;
-      if (!q.length) return;
-      const [next, ...rest] = q;
-      setQueue(rest);
-      setTimeout(() => {
-        setSentIds(prev => new Set([...prev, next.id]));
-        window.location.href = next.viberUrl;
-      }, 800);
-    }
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, []);
-
-  function openViber(url, id) { setSentIds(prev => new Set([...prev, id])); window.location.href = url; }
-
-  function notifyAll() {
-    if (!links?.length) return;
-    const unsent = links.filter(lk => !sentIds.has(lk.id));
-    if (!unsent.length) return;
-    const [first, ...rest] = unsent;
-    setQueue(rest);
-    setSentIds(prev => new Set([...prev, first.id]));
-    window.location.href = first.viberUrl;
-  }
-
-  const sentCount = (links || []).filter(lk => sentIds.has(lk.id)).length;
-  const allSent   = links?.length > 0 && sentCount === links.length;
-
-  return (
-    <Sheet title="Notify via Viber" onClose={onClose}>
-      <div style={{ background:`${color}12`, borderRadius:14, padding:'12px 14px', marginBottom:16, border:`1px solid ${color}28` }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <div style={{ width:38, height:38, borderRadius:11, background:`${color}22`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <Icon n="cal" size={18} color={color}/>
-          </div>
-          <div>
-            <p style={{ fontWeight:700, fontSize:14, color:C.text }}>{name}</p>
-            <p style={{ fontSize:12, color:C.muted }}>{fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''} · {entry.days} day{entry.days!==1?'s':''}</p>
-          </div>
-        </div>
-      </div>
-
-      {links === null ? (
-        <Spinner label="Loading contacts…"/>
-      ) : links.length === 0 ? (
-        <Card style={{ padding:'14px 16px', border:`1.5px dashed ${C.border}`, textAlign:'center' }}>
-          <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>No Viber contacts yet.<br/>Add them in <strong>Settings → Viber</strong>.</p>
-        </Card>
-      ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {allSent ? (
-            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:C.greenSoft, borderRadius:12, border:`1px solid ${C.green}30` }}>
-              <Icon n="check" size={16} color={C.green}/>
-              <p style={{ fontSize:13, color:C.green, fontWeight:600 }}>All {links.length} contact{links.length>1?'s':''} notified!</p>
-            </div>
-          ) : links.length > 1 ? (
-            <Btn full variant="viber" onClick={notifyAll}>
-              <Icon n="viber" size={16} color="#fff"/>
-              {sentCount > 0 ? `Continue (${sentCount}/${links.length} done)` : `Notify All (${links.length} contacts)`}
-            </Btn>
-          ) : null}
-
-          {links.map(lk => {
-            const sent = sentIds.has(lk.id);
-            return (
-              <button key={lk.id} onClick={() => !sent && openViber(lk.viberUrl, lk.id)}
-                style={{ display:'block', width:'100%', background:'none', border:'none', padding:0, cursor: sent ? 'default' : 'pointer', textAlign:'left' }}>
-                <Card style={{ padding:'14px 16px', background: sent ? C.greenSoft : 'linear-gradient(135deg,rgba(115,96,242,0.10),rgba(155,139,255,0.08))', border:`1.5px solid ${sent ? C.green+'40' : C.viber+'40'}`, transition:'all .2s ease' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                    <div style={{ width:42, height:42, borderRadius:13, background: sent ? C.greenSoft : 'linear-gradient(135deg,#7360F2,#9B8BFF)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow: sent ? 'none' : '0 3px 10px rgba(115,96,242,0.3)' }}>
-                      <Icon n={sent ? 'check' : 'viber'} size={20} color={sent ? C.green : '#fff'}/>
-                    </div>
-                    <div style={{ flex:1 }}>
-                      <p style={{ fontWeight:700, fontSize:14, color: sent ? C.green : C.viber }}>{lk.recipientName}</p>
-                      <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{lk.phone}</p>
-                    </div>
-                    <div style={{ background: sent ? C.green : C.viber, borderRadius:10, padding:'5px 12px' }}>
-                      <span style={{ fontSize:12, fontWeight:700, color:'#fff' }}>{sent ? '✓ Sent' : 'Open →'}</span>
-                    </div>
-                  </div>
-                </Card>
-              </button>
-            );
-          })}
-        </div>
-      )}
-      <Btn full variant="ghost" onClick={onClose} style={{ marginTop:12 }}>Done</Btn>
-    </Sheet>
-  );
-}
-
-// ─── History Screen ───────────────────────────────────────────────────────────
-function HistoryScreen({ leaveTypes, history, onRefresh, toast, recipients }) {
-  const [C] = useTheme();
-  const [filter,      setFilter]  = useState('all');
-  const [deleting,    setDel]     = useState(null);
-  const [viberEntry,  setViber]   = useState(null);
-
-  async function cancel(id) {
-    setDel(id);
-    try { await api.cancelLeave(id); toast('Leave cancelled — balance restored.'); onRefresh(); }
-    catch(err) { toast(err.message, 'error'); }
-    finally { setDel(null); }
-  }
-
-  const filtered = filter==='all' ? history : history.filter(h=>(h.leaveTypeId||h.leave_type_id)===filter);
-
-  if (history.length === 0) return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:16, padding:'60px 20px', color:C.muted, textAlign:'center' }}>
-      <div style={{ width:80, height:80, borderRadius:'50%', background:C.faint, display:'flex', alignItems:'center', justifyContent:'center' }}>
-        <Icon n="hist" size={36} color={C.border}/>
-      </div>
-      <div>
-        <p style={{ fontSize:16, fontWeight:700, color:C.textSub, marginBottom:6 }}>No leave history yet</p>
-        <p style={{ fontSize:13, lineHeight:1.7, color:C.muted }}>Apply for leave to see it here.</p>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16, animation:'fadeIn .4s ease' }}>
-      {/* Summary */}
-      <Card style={{ padding:'18px 16px' }}>
-        <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:14 }}>Period Summary</p>
-        {leaveTypes.map(lt => (
-          <div key={lt.id} style={{ marginBottom:12 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-              <span style={{ fontSize:13, fontWeight:600, color:C.textSub }}>{lt.name}</span>
-              <span style={{ fontSize:13, fontWeight:700, color:lt.color }}>{lt.used} / {lt.total} days</span>
-            </div>
-            <div style={{ height:6, borderRadius:99, background:C.faint, overflow:'hidden' }}>
-              <div style={{ height:'100%', borderRadius:99, background:lt.color, width:`${lt.total>0?Math.min(100,(lt.used/lt.total)*100):0}%`, transition:'width .8s cubic-bezier(.4,0,.2,1)', boxShadow:`0 0 8px ${lt.color}60` }}/>
-            </div>
-          </div>
-        ))}
-      </Card>
-
-      {leaveTypes.length > 1 && (
-        <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:2 }}>
-          {['all', ...leaveTypes.map(l=>l.id)].map(t => {
-            const lt = leaveTypes.find(l=>l.id===t);
-            const active = filter===t;
-            return (
-              <button key={t} onClick={()=>setFilter(t)} style={{
-                border:`1.5px solid ${active ? C.accent : C.border}`,
-                background: active ? C.accent : C.surface,
-                color: active ? '#fff' : C.muted,
-                borderRadius:99, padding:'6px 16px', fontSize:12, fontWeight:600,
-                cursor:'pointer', flexShrink:0, fontFamily:"'Inter',sans-serif",
-                transition:'all .2s cubic-bezier(.34,1.56,.64,1)',
-                boxShadow: active ? `0 4px 12px ${C.accentSoft}` : 'none',
-              }}>{t==='all'?'All':lt?.name||t}</button>
-            );
-          })}
-        </div>
-      )}
-
-      <p style={{ fontSize:12, color:C.muted, fontWeight:500 }}>Tap <Icon n="viber" size={12} color={C.viber}/> to resend via Viber · 🗑 to cancel.</p>
-      {filtered.length===0
-        ? <p style={{ textAlign:'center', color:C.muted, fontSize:13, padding:'20px 0' }}>No entries for this type.</p>
-        : filtered.map(h => (
-            <HistoryRow key={h.id} item={h}
-              onViber={recipients?.length > 0 ? setViber : null}
-              onDelete={deleting===h.id ? null : cancel}/>
-          ))
-      }
-
-      {viberEntry && <HistoryViberSheet entry={viberEntry} onClose={()=>setViber(null)}/>}
-    </div>
-  );
-}
-
-// ─── Settings ─────────────────────────────────────────────────────────────────
-function AccountTab({ onClose, onLogout, toast }) {
-  const [C] = useTheme();
+function AccountTab({ onLogout, toast }) {
+  const [pkStatus, setPkStatus] = useState(null);
+  const [pkLoad, setPkLoad] = useState(false);
   const [logoutLoad, setLogoutLoad] = useState(false);
-  const [pkStatus, setPkStatus]     = useState(null);
-  const [pkLoad, setPkLoad]         = useState(false);
+  const [confirm, setConfirm] = useState(null);
 
   useEffect(() => {
     api.getPasskeyStatus().then(({ registered }) => setPkStatus(registered)).catch(() => setPkStatus(false));
@@ -1220,322 +1131,121 @@ function AccountTab({ onClose, onLogout, toast }) {
 
   async function handleLogout() {
     setLogoutLoad(true);
-    try { await api.logout(); onLogout(); onClose(); }
-    catch { toast('Sign out failed', 'error'); }
+    try { await api.logout(); onLogout(); }
+    catch { toast('Sign out failed.', 'error'); }
     finally { setLogoutLoad(false); }
   }
 
   async function registerPasskey() {
-    if (!window.PublicKeyCredential) { toast('Passkeys not supported on this browser.', 'error'); return; }
+    if (!window.PublicKeyCredential) { toast('Passkeys are not supported on this browser.', 'error'); return; }
     setPkLoad(true);
     try {
       const { challenge, challengeId, rpId, rpName, userId } = await api.getPasskeyChallenge();
       const userIdBytes = userId
-        ? new Uint8Array(userId.replace(/-/g,'').match(/.{2}/g).map(b=>parseInt(b,16)))
+        ? new Uint8Array(userId.replace(/-/g, '').match(/.{2}/g).map(b => parseInt(b, 16)))
         : crypto.getRandomValues(new Uint8Array(16));
       const credential = await navigator.credentials.create({
         publicKey: {
-          challenge: b64urlToUint8(challenge), rp:{ id:rpId, name:rpName||'Leave Manager' },
-          user:{ id:userIdBytes, name:'user', displayName:'Leave Manager' },
-          pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
-          authenticatorSelection:{ authenticatorAttachment:'platform', userVerification:'required', residentKey:'preferred' },
-          timeout:60000,
+          challenge: b64urlToUint8(challenge), rp: { id: rpId, name: rpName || 'Leave Manager' },
+          user: { id: userIdBytes, name: 'user', displayName: 'Leave Manager' },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+          authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
+          timeout: 60000,
         },
       });
       if (!credential) throw new Error('No credential created');
       let pkBytes;
       try { pkBytes = credential.response.getPublicKey?.() || credential.response.clientDataJSON; }
       catch { pkBytes = credential.response.clientDataJSON; }
-      await api.registerPasskey({ credentialId:credential.id, publicKey:uint8ToB64url(pkBytes), challengeId });
-      toast('Passkey registered! Sign in with biometrics next time.');
+      await api.registerPasskey({ credentialId: credential.id, publicKey: uint8ToB64url(pkBytes), challengeId });
+      toast('Passkey registered. You can sign in with biometrics next time.');
       setPkStatus(true);
-    } catch(e) {
-      if (e.name==='NotAllowedError') toast('Passkey registration cancelled.', 'error');
-      else toast(e.message||'Failed to register passkey.', 'error');
+    } catch (e) {
+      if (e.name === 'NotAllowedError') toast('Passkey registration cancelled.', 'error');
+      else toast(e.message || 'Failed to register passkey.', 'error');
     } finally { setPkLoad(false); }
   }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14, paddingBottom:16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <Card pad={16}>
+        <div className="lm-eyebrow" style={{ marginBottom: 6 }}>Signed in</div>
+        <div style={{ fontWeight: 600, fontSize: 15 }}>Sessions last 30 days.</div>
+      </Card>
+
       {window.PublicKeyCredential && (
-        <Card style={{ padding:'16px 18px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
-            <div style={{ width:34, height:34, borderRadius:10, background:C.accentSoft, display:'flex', alignItems:'center', justifyContent:'center' }}>
-              <Icon n="fingerprint" size={18} color={C.accent}/>
-            </div>
-            <p style={{ fontSize:14, fontWeight:700, color:C.text }}>Passkey (Biometric Sign-in)</p>
+        <Card pad={16}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <Icon name="fingerprint" size={18} style={{ color: 'var(--accent)' }}/>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Passkey</span>
+            {pkStatus === true && <Pill tone="ok">Active</Pill>}
+            {pkStatus === false && <Pill tone="neutral">Off</Pill>}
           </div>
           {pkStatus === null ? (
-            <p style={{ fontSize:13, color:C.muted }}>Checking…</p>
+            <p className="lm-meta" style={{ fontSize: 12 }}>Checking…</p>
           ) : pkStatus ? (
-            <div style={{ display:'flex', alignItems:'center', gap:8, background:C.greenSoft, padding:'10px 14px', borderRadius:12 }}>
-              <Icon n="check" size={16} color={C.green}/>
-              <p style={{ fontSize:13, color:C.green, fontWeight:600 }}>Active — you can sign in with biometrics</p>
-            </div>
+            <p className="lm-meta" style={{ fontSize: 12 }}>You can sign in with Face ID or fingerprint.</p>
           ) : (
             <>
-              <p style={{ fontSize:13, color:C.textSub, lineHeight:1.6, marginBottom:12 }}>Register your fingerprint or Face ID to skip the password.</p>
-              <Btn variant="ghost" full sm onClick={registerPasskey} loading={pkLoad}>
-                <Icon n="fingerprint" size={15}/> Register Passkey
+              <p className="lm-meta" style={{ fontSize: 12, marginBottom: 12 }}>
+                Register your fingerprint or Face ID to skip the password.
+              </p>
+              <Btn variant="secondary" full size="sm" leading="fingerprint" loading={pkLoad} onClick={registerPasskey}>
+                Register passkey
               </Btn>
             </>
           )}
         </Card>
       )}
-      <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>You are signed in. Sessions last 30 days.</p>
-      <Btn full variant="danger" onClick={handleLogout} loading={logoutLoad} style={{ borderRadius:14, padding:14 }}>
-        Sign Out
-      </Btn>
+
+      <Btn variant="danger" full onClick={() => setConfirm({
+        msg: 'Sign out? You can sign back in any time.',
+        confirmLabel: 'Sign out', danger: true,
+        onConfirm: handleLogout,
+      })} loading={logoutLoad}>Sign out</Btn>
+
+      {confirm && <ConfirmSheet {...confirm} onClose={() => setConfirm(null)}/>}
     </div>
   );
 }
 
-function SettingsModal({ leaveTypes, recipients, settings, onClose, onRefresh, onLogout, toast }) {
-  const [tab, setTab] = useState('leaves');
-  const [C]           = useTheme();
-  const tabs = [['leaves','🌿','Leaves'],['recipients','💬','Viber'],['contract','📅','Contract'],['account','👤','Account']];
+function ConfirmSheet({ msg, confirmLabel = 'Confirm', danger, onConfirm, onClose }) {
   return (
-    <Sheet title="Settings" onClose={onClose}>
-      <div style={{ display:'flex', background:C.faint, borderRadius:16, padding:4, marginBottom:22, gap:3 }}>
-        {tabs.map(([id,em,label]) => (
-          <button key={id} onClick={()=>setTab(id)} style={{
-            flex:1, padding:'9px 4px', border:'none', borderRadius:13,
-            fontWeight:600, fontSize:11, cursor:'pointer', fontFamily:"'Inter',sans-serif",
-            background: tab===id ? C.surface : 'transparent',
-            color: tab===id ? C.text : C.muted,
-            boxShadow: tab===id ? C.shadow : 'none',
-            transition:'all .2s ease',
-          }}>
-            {em} {label}
-          </button>
-        ))}
+    <Sheet title="Confirm" onClose={onClose}>
+      <p style={{ margin: '0 0 18px', fontSize: 15, color: 'var(--ink-2)', lineHeight: 1.5 }}>{msg}</p>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn variant="secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
+        <Btn variant={danger ? 'danger' : 'primary'} onClick={() => { onConfirm(); onClose(); }} style={{ flex: 2 }}>
+          {confirmLabel}
+        </Btn>
       </div>
-      {tab==='leaves'     && <LeaveTypesTab  leaveTypes={leaveTypes} onRefresh={onRefresh} toast={toast}/>}
-      {tab==='recipients' && <RecipientsTab  recipients={recipients} onRefresh={onRefresh} toast={toast}/>}
-      {tab==='contract'   && <ContractTab    settings={settings}     onRefresh={onRefresh} toast={toast}/>}
-      {tab==='account'    && <AccountTab     onClose={onClose}       onLogout={onLogout}   toast={toast}/>}
     </Sheet>
   );
 }
 
-function LeaveTypesTab({ leaveTypes, onRefresh, toast }) {
-  const [C]               = useTheme();
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [form, setForm]   = useState({ name:'', total:14, color:PALETTE[0] });
-  const [saving, setSaving] = useState(false);
-
-  async function add() {
-    if (!form.name.trim()) return;
-    setSaving(true);
-    try { await api.addLeaveType({ name:form.name.trim(), total:Number(form.total), color:form.color }); toast('Leave type added!'); onRefresh(); setAdding(false); setForm({ name:'', total:14, color:PALETTE[0] }); }
-    catch(err) { toast(err.message, 'error'); }
-    setSaving(false);
-  }
-  async function saveEdit() {
-    setSaving(true);
-    try { await api.updateLeaveType(editing.id, { name:editing.name, total:Number(editing.total), color:editing.color }); toast('Saved!'); onRefresh(); setEditing(null); }
-    catch(err) { toast(err.message, 'error'); }
-    setSaving(false);
-  }
-  async function remove(id) {
-    try { await api.deleteLeaveType(id); toast('Leave type removed.'); onRefresh(); }
-    catch(err) { toast(err.message, 'error'); }
-  }
-
-  const ColorPicker = ({ value, onChange }) => (
-    <div>
-      <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:10 }}>Color</p>
-      <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-        {PALETTE.map(c => (
-          <button key={c} onClick={()=>onChange(c)} style={{
-            width:30, height:30, borderRadius:'50%', background:c, cursor:'pointer',
-            border: value===c ? `3px solid ${C.text}` : '3px solid transparent',
-            boxShadow: value===c ? `0 0 0 2px ${C.bg}` : 'none',
-            transition:'all .2s ease',
-          }}/>
-        ))}
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-      {leaveTypes.map(lt => (
-        <Card key={lt.id} style={{ padding:'14px 16px' }}>
-          {editing?.id===lt.id ? (
-            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-              <TInput label="Name" value={editing.name} onChange={e=>setEditing(p=>({...p,name:e.target.value}))}/>
-              <TInput label="Total days / year" type="number" min="1" value={editing.total} onChange={e=>setEditing(p=>({...p,total:e.target.value}))}/>
-              <ColorPicker value={editing.color} onChange={c=>setEditing(p=>({...p,color:c}))}/>
-              <div style={{ display:'flex', gap:8 }}>
-                <Btn variant="ghost" sm style={{ flex:1 }} onClick={()=>setEditing(null)}>Cancel</Btn>
-                <Btn sm style={{ flex:1 }} onClick={saveEdit} loading={saving}>Save</Btn>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                <div style={{ width:14, height:14, borderRadius:'50%', background:lt.color, flexShrink:0, boxShadow:`0 0 8px ${lt.color}60` }}/>
-                <span style={{ flex:1, fontWeight:700, fontSize:14, color:C.text }}>{lt.name}</span>
-                <button onClick={()=>setEditing({id:lt.id,name:lt.name,total:lt.total,color:lt.color})} style={{ background:'none', border:'none', cursor:'pointer', padding:'4px 6px', borderRadius:8 }}><Icon n="edit" size={15} color={C.muted}/></button>
-                <button onClick={()=>remove(lt.id)} style={{ background:'none', border:'none', cursor:'pointer', padding:'4px 6px', borderRadius:8 }}><Icon n="trash" size={15} color={C.muted}/></button>
-              </div>
-              <div style={{ display:'flex', gap:16, marginTop:10, marginLeft:24 }}>
-                <span style={{ fontSize:12, color:C.muted }}>Total: <b style={{color:C.text}}>{lt.total}d</b></span>
-                <span style={{ fontSize:12, color:C.muted }}>Used: <b style={{color:lt.color}}>{lt.used}d</b></span>
-                <span style={{ fontSize:12, color:C.muted }}>Left: <b style={{color:C.text}}>{Math.max(0,lt.total-lt.used)}d</b></span>
-              </div>
-              <div style={{ height:5, borderRadius:99, background:C.faint, marginTop:10, marginLeft:24, overflow:'hidden' }}>
-                <div style={{ height:'100%', borderRadius:99, background:lt.color, width:`${lt.total>0?Math.min(100,(lt.used/lt.total)*100):0}%`, transition:'width .6s ease', boxShadow:`0 0 6px ${lt.color}50` }}/>
-              </div>
-            </>
-          )}
-        </Card>
-      ))}
-      {adding ? (
-        <Card style={{ padding:16, border:`1.5px solid ${C.accent}30`, background:C.accentSoft }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-            <TInput label="Leave Type Name" value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Study Leave, Maternity…"/>
-            <TInput label="Total Days / Year" type="number" min="1" value={form.total} onChange={e=>setForm(p=>({...p,total:e.target.value}))}/>
-            <ColorPicker value={form.color} onChange={c=>setForm(p=>({...p,color:c}))}/>
-            <div style={{ display:'flex', gap:8 }}>
-              <Btn variant="ghost" sm style={{ flex:1 }} onClick={()=>setAdding(false)}>Cancel</Btn>
-              <Btn sm style={{ flex:1 }} onClick={add} loading={saving}>Add</Btn>
-            </div>
-          </div>
-        </Card>
-      ) : (
-        <Btn variant="ghost" full onClick={()=>setAdding(true)}><Icon n="plus" size={16}/> Add Leave Type</Btn>
-      )}
-    </div>
-  );
-}
-
-function RecipientsTab({ recipients, onRefresh, toast }) {
-  const [C]               = useTheme();
-  const [adding, setAdding] = useState(false);
-  const [form, setForm]   = useState({ name:'', phone:'' });
-  const [saving, setSaving] = useState(false);
-  const set = (k,v) => setForm(p=>({...p,[k]:v}));
-
-  async function add() {
-    if (!form.name.trim()||!form.phone.trim()) return;
-    setSaving(true);
-    try { await api.addRecipient({ name:form.name.trim(), phone:form.phone.trim() }); toast('Recipient added!'); onRefresh(); setForm({name:'',phone:''}); setAdding(false); }
-    catch(err) { toast(err.message,'error'); }
-    setSaving(false);
-  }
-  async function remove(id) {
-    try { await api.deleteRecipient(id); toast('Recipient removed.'); onRefresh(); }
-    catch(err) { toast(err.message,'error'); }
-  }
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-      <Card style={{ padding:'12px 16px', background:'linear-gradient(135deg,rgba(115,96,242,0.08),rgba(155,139,255,0.08))', border:`1px solid ${C.viber}25` }}>
-        <p style={{ fontSize:12, color:C.viber, lineHeight:1.65, fontWeight:500 }}>💬 After applying for leave, the app opens Viber with a pre-filled message. One tap to send.</p>
-      </Card>
-      {recipients.length===0&&!adding&&<p style={{ fontSize:13, color:C.muted, textAlign:'center', padding:'12px 0' }}>No contacts yet. Add your manager or HR.</p>}
-      {recipients.map(r => (
-        <Card key={r.id} style={{ padding:'13px 16px' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <div style={{ width:42, height:42, borderRadius:13, background:'rgba(115,96,242,0.12)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-              <Icon n="user" size={20} color={C.viber}/>
-            </div>
-            <div style={{ flex:1 }}>
-              <p style={{ fontWeight:700, fontSize:14, color:C.text }}>{r.name}</p>
-              <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{r.phone}</p>
-            </div>
-            <button onClick={()=>remove(r.id)} style={{ background:C.faint, border:`1px solid ${C.border}`, cursor:'pointer', padding:'7px 8px', borderRadius:10, transition:'all .15s' }}><Icon n="trash" size={15} color={C.muted}/></button>
-          </div>
-        </Card>
-      ))}
-      {adding ? (
-        <Card style={{ padding:16, border:`1.5px solid ${C.viber}30`, background:'rgba(115,96,242,0.05)' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-            <TInput label="Contact Name" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="e.g. Manager, HR"/>
-            <TInput label="Phone (with country code)" type="tel" value={form.phone} onChange={e=>set('phone',e.target.value)} placeholder="+960 7XX XXXX" helper="Must include country code for Viber deep-link."/>
-            <div style={{ display:'flex', gap:8 }}>
-              <Btn variant="ghost" sm style={{ flex:1 }} onClick={()=>setAdding(false)}>Cancel</Btn>
-              <Btn variant="viber" sm style={{ flex:1 }} onClick={add} loading={saving}><Icon n="viber" size={15} color="#fff"/> Add</Btn>
-            </div>
-          </div>
-        </Card>
-      ) : (
-        <Btn variant="ghost" full onClick={()=>setAdding(true)}><Icon n="plus" size={16}/> Add Viber Contact</Btn>
-      )}
-    </div>
-  );
-}
-
-function ContractTab({ settings, onRefresh, toast }) {
-  const [C]             = useTheme();
-  const [date, setDate] = useState(settings.contractRenewal||'');
-  const [saving, setSave] = useState(false);
-  const saved = date===(settings.contractRenewal||'');
-  const days  = daysTo(date);
-
-  async function save() {
-    setSave(true);
-    try { await api.updateSettings({ contractRenewal:date }); toast('Contract date saved!'); onRefresh(); }
-    catch(err) { toast(err.message,'error'); }
-    setSave(false);
-  }
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <Card style={{ padding:'14px 16px', background:C.accentSoft, border:`1px solid ${C.accent}25` }}>
-        <p style={{ fontSize:13, color:C.accent, lineHeight:1.65, fontWeight:500 }}>
-          <strong>🔄 Auto-reset:</strong> On the renewal date, all leave balances reset to their full amounts and the date automatically advances by 1 year.
-        </p>
-      </Card>
-      <TInput label="Next Renewal Date" type="date" value={date} onChange={e=>setDate(e.target.value)}/>
-      {date && days!==null && (
-        <Card style={{ padding:'12px 16px', background: days<=30 ? C.orangeSoft : C.greenSoft, border:`1px solid ${days<=30 ? C.orange : C.green}30` }}>
-          <p style={{ fontSize:13, fontWeight:700, color: days<=30 ? C.orange : C.green }}>
-            {days>0 ? `${days} days until balance reset` : days===0 ? '🔄 Reset happens today!' : `${Math.abs(days)} days overdue`}
-          </p>
-        </Card>
-      )}
-      {settings.lastResetDate && (
-        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 14px', background:C.faint, borderRadius:12 }}>
-          <Icon n="refresh" size={14} color={C.muted}/>
-          <p style={{ fontSize:12, color:C.muted, fontWeight:500 }}>Last reset: <strong>{fmt(settings.lastResetDate)}</strong></p>
-        </div>
-      )}
-      <Btn full onClick={save} disabled={saved} loading={saving} style={{ marginTop:4 }}>
-        {saved ? '✓ Saved' : 'Save Renewal Date'}
-      </Btn>
-    </div>
-  );
-}
-
-// ─── Root App ─────────────────────────────────────────────────────────────────
+// ─── Root App ────────────────────────────────────────────────────────────────
 export default function App() {
-  const [C, dark, toggleDark] = useTheme();
-  const [authed,    setAuthed]    = useState(false);
+  const [dark, toggleDark] = useTheme();
+  const [authed, setAuthed] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [leaveTypes, setLeaveTypes] = useState([]);
-  const [history,    setHistory]    = useState([]);
+  const [history, setHistory] = useState([]);
   const [recipients, setRecipients] = useState([]);
-  const [settings,   setSettings]   = useState({});
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState(null);
-  const [tab,        setTab]        = useState('home');
-  const [applyOpen,  setApplyOpen]  = useState(false);
-  const [settOpen,   setSettOpen]   = useState(false);
-  const [justReset,  setJustReset]  = useState(false);
-  const [toast,      setToast]      = useState(null);
-  const [applySheetTitle, setApplySheetTitle] = useState('Apply for Leave');
-  const prevTab = useRef(tab);
+  const [settings, setSettings] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [tab, setTab] = useState('home');
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [justReset, setJustReset] = useState(false);
+  const [toast, setToastState] = useState(null);
 
-  function showToast(msg, type='success') { setToast({ msg, type, key:uid() }); }
+  function showToast(msg, tone = 'ok') { setToastState({ msg, tone, key: uid() }); }
 
   useEffect(() => {
-    const el = document.querySelector('meta[name="theme-color"]');
-    if (el) el.setAttribute('content', dark ? '#0A0A12' : '#F0F0F5');
-  }, [dark]);
+    if (!toast) return;
+    const id = setTimeout(() => setToastState(null), 2400);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   useEffect(() => {
     const h = () => { setAuthed(false); setLoading(false); };
@@ -1555,7 +1265,7 @@ export default function App() {
       setSettings(setts);
       setError(null);
       setAuthed(true);
-    } catch(err) {
+    } catch (err) {
       if (err.message !== 'Authentication required') setError(err.message);
     }
   }
@@ -1567,133 +1277,129 @@ export default function App() {
   }, []);
 
   async function onLogin() { setLoading(true); await loadAll(); setLoading(false); }
-  function onLogout() { setAuthed(false); }
+  function onLogout() { setAuthed(false); setTab('home'); }
   async function completeOnboarding(renewalDate) {
-    await api.updateSettings({ onboarded:'true', contractRenewal:renewalDate||'' });
+    await api.updateSettings({ onboarded: 'true', contractRenewal: renewalDate || '' });
     await loadAll();
   }
 
-  useEffect(() => { prevTab.current = tab; }, [tab]);
-
   if (!authReady || loading) return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:C.bg }}>
-      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:20 }}>
-        <div style={{ width:56, height:56, borderRadius:18, background:C.accentGrad, display:'flex', alignItems:'center', justifyContent:'center', animation:'float 2s ease-in-out infinite', boxShadow:`0 8px 30px ${C.accentSoft}` }}>
-          <Icon n="sparkle" size={26} color="#fff"/>
-        </div>
-        <div style={{ width:32, height:32, borderRadius:'50%', border:`3px solid ${C.border}`, borderTopColor:C.accent, animation:'spin .7s linear infinite' }}/>
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'var(--paper)' }}>
+      <Spinner/>
     </div>
   );
 
-  if (!authed) return <AuthScreen onLogin={onLogin}/>;
+  if (!authed) return <AuthScreen onLogin={onLogin} dark={dark} onToggleDark={toggleDark}/>;
 
   if (error) return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100vh', background:C.bg, fontFamily:"'Inter',sans-serif", padding:32, textAlign:'center', gap:16 }}>
-      <span style={{ fontSize:48 }}>⚠️</span>
-      <h2 style={{ fontSize:20, fontWeight:800, color:C.text, fontFamily:"'Cal Sans','Inter',sans-serif", letterSpacing:'-0.02em' }}>Connection error</h2>
-      <p style={{ fontSize:13, color:C.muted, lineHeight:1.7, maxWidth:300 }}>Cannot reach the backend. Check your <code>VITE_API_URL</code> setting.</p>
-      <p style={{ fontSize:11, color:C.muted, background:C.faint, padding:'8px 12px', borderRadius:8 }}>{error}</p>
-      <Btn onClick={()=>{ setLoading(true); loadAll().finally(()=>setLoading(false)); }}>Retry</Btn>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'var(--paper)', padding: 32, textAlign: 'center', gap: 14 }}>
+      <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--danger-soft)', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="info" size={24}/>
+      </div>
+      <h2 className="lm-h2" style={{ margin: 0 }}>Can't reach the server.</h2>
+      <p className="lm-meta" style={{ maxWidth: 320 }}>Check your connection and try again.</p>
+      <p style={{ fontSize: 11, color: 'var(--ink-3)', background: 'var(--paper-2)', padding: '6px 10px', borderRadius: 8 }}>{error}</p>
+      <Btn onClick={() => { setLoading(true); loadAll().finally(() => setLoading(false)); }}>Retry</Btn>
     </div>
   );
 
   if (settings.onboarded !== 'true') return <Onboarding onDone={completeOnboarding}/>;
 
-  const tabTitles = { home:'Overview', apply:'Apply for Leave', history:'History' };
+  const tabTitles = { home: 'Today', apply: 'Apply', history: 'History', settings: 'Settings' };
+  const tabEyebrow = {
+    home: new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }),
+    apply: 'Request leave',
+    history: 'Past leave',
+    settings: 'Preferences',
+  };
 
   return (
     <>
-      <style>{GLOBAL_CSS}</style>
-      <style>{`
-        body { background: ${C.bg}; color: ${C.text}; --cal-filter: ${dark ? 'invert(1)' : 'none'}; }
-        input, select, textarea { color-scheme: ${dark ? 'dark' : 'light'}; }
-      `}</style>
+      {toast && <Toast key={toast.key} message={toast.msg} tone={toast.tone}/>}
 
-      {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={()=>setToast(null)}/>}
-
-      <div style={{ maxWidth:480, margin:'0 auto', minHeight:'100vh', background:C.bg, fontFamily:"'Inter',sans-serif", position:'relative' }}>
-
-        {/* Header */}
-        <div style={{ padding:'calc(env(safe-area-inset-top, 44px) + 14px) 20px 0', position:'sticky', top:0, zIndex:100, background:`${C.bg}ee`, backdropFilter:'blur(20px)', borderBottom:`1px solid ${C.border}20` }}>
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', paddingBottom:16 }}>
-            <div>
-              <p style={{ fontSize:12, color:C.muted, fontWeight:600, letterSpacing:'0.04em', marginBottom:4 }}>
-                {new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}
-              </p>
-              <h1 style={{ fontSize:28, fontWeight:800, color:C.text, fontFamily:"'Cal Sans','Inter',sans-serif", lineHeight:1, letterSpacing:'-0.03em' }}>
-                {tabTitles[tab]}
-              </h1>
-            </div>
-            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <DarkToggle dark={dark} onToggle={toggleDark}/>
-              <button onClick={()=>setSettOpen(true)} style={{
-                background:C.surface, border:`1px solid ${C.border}`, borderRadius:14,
-                width:42, height:42, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
-                boxShadow:C.shadow, transition:'all .2s ease',
-              }}>
-                <Icon n="cog" size={18} color={C.textSub}/>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div style={{ padding:'20px 20px calc(env(safe-area-inset-bottom, 0px) + 90px)', animation:'fadeIn .3s ease' }}>
-          {tab==='home'    && <HomeScreen leaveTypes={leaveTypes} settings={settings} history={history} onApply={()=>setApplyOpen(true)} justReset={justReset} onDismissReset={()=>setJustReset(false)}/>}
-          {tab==='history' && <HistoryScreen leaveTypes={leaveTypes} history={history} recipients={recipients} onRefresh={loadAll} toast={showToast}/>}
-        </div>
-
-        {/* Bottom Nav */}
+      <div style={{ maxWidth: 480, margin: '0 auto', minHeight: '100vh', background: 'var(--paper)', position: 'relative' }}>
         <div style={{
-          position:'fixed', bottom:0, left:'50%', transform:'translateX(-50%)',
-          width:'100%', maxWidth:480,
-          background:C.navBg,
-          borderTop:`1px solid ${C.border}`,
-          backdropFilter:'blur(20px)',
-          display:'flex', padding:'10px 0 calc(env(safe-area-inset-bottom, 0px) + 10px)',
-          boxShadow:`0 -8px 30px rgba(0,0,0,${dark?.15:.08})`,
-          zIndex:200,
+          padding: 'calc(env(safe-area-inset-top, 0px) + 16px) 20px 14px',
+          borderBottom: '1px solid var(--rule)',
+          background: 'color-mix(in srgb, var(--paper) 92%, transparent)',
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12,
+          position: 'sticky', top: 0, zIndex: 100,
         }}>
-          {[{id:'home',icon:'home',label:'Home'},{id:'apply',icon:'apply',label:'Apply'},{id:'history',icon:'hist',label:'History'}].map(({id,icon,label}) => {
-            const active = id==='apply' ? applyOpen : tab===id;
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="lm-eyebrow" style={{ marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {tabEyebrow[tab]}
+            </div>
+            <h1 className="lm-display" style={{ fontSize: 30, lineHeight: 1, letterSpacing: '-0.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {tabTitles[tab]}
+            </h1>
+          </div>
+          <ThemeToggle dark={dark} onToggle={toggleDark}/>
+        </div>
+
+        <div style={{ padding: '20px 20px calc(env(safe-area-inset-bottom, 0px) + 100px)' }}>
+          {tab === 'home' && (
+            <HomeScreen leaveTypes={leaveTypes} settings={settings} history={history}
+              onApply={() => setApplyOpen(true)} justReset={justReset}
+              onDismissReset={() => setJustReset(false)}/>
+          )}
+          {tab === 'apply' && (
+            <ApplyScreen leaveTypes={leaveTypes} recipients={recipients}
+              onClose={() => setTab('home')}
+              onSuccess={() => { loadAll(); setTab('home'); showToast('Leave submitted.'); }}
+              toast={showToast}/>
+          )}
+          {tab === 'history' && (
+            <HistoryScreen leaveTypes={leaveTypes} history={history}
+              onRefresh={loadAll} toast={showToast}/>
+          )}
+          {tab === 'settings' && (
+            <SettingsScreen leaveTypes={leaveTypes} recipients={recipients} settings={settings}
+              onRefresh={loadAll} onLogout={onLogout} toast={showToast}/>
+          )}
+        </div>
+
+        <div style={{
+          position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)',
+          width: '100%', maxWidth: 480, zIndex: 200,
+          padding: '10px 20px calc(env(safe-area-inset-bottom, 0px) + 12px)',
+          background: 'color-mix(in srgb, var(--paper) 92%, transparent)',
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          borderTop: '1px solid var(--rule)',
+          display: 'flex', gap: 4,
+        }}>
+          {[
+            { id: 'home', label: 'Home', icon: 'home' },
+            { id: 'apply', label: 'Apply', icon: 'calendar-plus' },
+            { id: 'history', label: 'History', icon: 'clock' },
+            { id: 'settings', label: 'Settings', icon: 'settings' },
+          ].map(it => {
+            const active = tab === it.id;
             return (
-              <button key={id} onClick={()=> id==='apply' ? setApplyOpen(true) : setTab(id)} style={{
-                flex:1, background:'none', border:'none', cursor:'pointer',
-                display:'flex', flexDirection:'column', alignItems:'center', gap:5, padding:'6px 0',
-                fontFamily:"'Inter',sans-serif",
-                transition:'all .2s ease',
-              }}>
-                <div style={{
-                  width:48, height:32, borderRadius:12,
-                  background: active ? C.accentSoft : 'transparent',
-                  display:'flex', alignItems:'center', justifyContent:'center',
-                  transition:'all .3s cubic-bezier(.34,1.56,.64,1)',
-                  transform: active ? 'scale(1.1)' : 'scale(1)',
+              <button key={it.id} onClick={() => { if (it.id === 'apply') setApplyOpen(true); else setTab(it.id); }}
+                aria-label={it.label}
+                style={{
+                  flex: 1, border: 0, background: active ? 'var(--accent-soft)' : 'transparent',
+                  color: active ? 'var(--accent)' : 'var(--ink-3)',
+                  padding: '8px 4px', borderRadius: 10,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                  fontFamily: 'var(--ff-text)', fontSize: 10, fontWeight: 600,
+                  transition: 'background var(--dur), color var(--dur)',
                 }}>
-                  <Icon n={icon} size={20} color={active ? C.accent : C.muted}/>
-                </div>
-                <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.04em', color: active ? C.accent : C.muted, transition:'color .2s' }}>{label}</span>
+                <Icon name={it.icon} size={18}/>
+                {it.label}
               </button>
             );
           })}
         </div>
 
-        {/* Apply Sheet */}
         {applyOpen && (
-          <Sheet title={applySheetTitle} onClose={()=>{loadAll();setApplyOpen(false);setApplySheetTitle('Apply for Leave');}}>
-            <ApplyForm leaveTypes={leaveTypes} recipients={recipients}
-              onClose={()=>{setApplyOpen(false);setApplySheetTitle('Apply for Leave');}}
-              onTitleChange={setApplySheetTitle}
-              onSuccess={()=>{loadAll();setApplyOpen(false);setApplySheetTitle('Apply for Leave');showToast('Leave submitted!');}}
+          <Sheet title="Apply for leave" onClose={() => setApplyOpen(false)}>
+            <ApplyScreen leaveTypes={leaveTypes} recipients={recipients}
+              onClose={() => setApplyOpen(false)}
+              onSuccess={() => { loadAll(); setApplyOpen(false); showToast('Leave submitted.'); }}
               toast={showToast}/>
           </Sheet>
-        )}
-
-        {/* Settings Sheet */}
-        {settOpen && (
-          <SettingsModal leaveTypes={leaveTypes} recipients={recipients} settings={settings}
-            onClose={()=>setSettOpen(false)} onRefresh={loadAll} onLogout={onLogout} toast={showToast}/>
         )}
       </div>
     </>
