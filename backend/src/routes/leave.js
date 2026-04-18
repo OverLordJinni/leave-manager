@@ -23,6 +23,16 @@ function dbErr(res, req, err) {
   res.status(500).json({ error: 'Internal server error' });
 }
 
+// Encode urgent_task into reason field to avoid a DB migration
+// Format: "reason text\n__UT__:urgent task text"
+const UT_MARKER = '\n__UT__:';
+function encodeReason(reason, urgentTask) {
+  const r = (reason || '').trim();
+  const u = (urgentTask || '').trim();
+  if (!u) return r || null;
+  return `${r}${UT_MARKER}${u}`;
+}
+
 // ── Contract renewal reset ────────────────────────────────────────────────────
 async function checkAndApplyReset() {
   // Read both contractRenewal and lastResetDate together
@@ -134,11 +144,13 @@ router.post('/apply', async (req, res) => {
   const startDate   = clean(req.body.startDate,   10);
   const endDate     = clean(req.body.endDate,     10);
   const reason      = clean(req.body.reason||'',  500);
+  const urgentTask  = clean(req.body.urgentTask||'', 300);
   const errs        = [];
   if (!leaveTypeId)           errs.push('leaveTypeId required');
   if (!isDate(startDate))     errs.push('startDate must be YYYY-MM-DD');
   if (!isDate(endDate))       errs.push('endDate must be YYYY-MM-DD');
   if (startDate && endDate && endDate < startDate) errs.push('endDate must be >= startDate');
+  if (!reason)                errs.push('reason is required');
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
   try {
@@ -154,7 +166,7 @@ router.post('/apply', async (req, res) => {
 
     const { data: entry, error: insErr } = await supabase.from('leave_history')
       .insert({ leave_type_id: leaveTypeId, type_name: lt.name, type_color: lt.color,
-                start_date: startDate, end_date: endDate, days, reason: reason||null })
+                start_date: startDate, end_date: endDate, days, reason: encodeReason(reason, urgentTask) })
       .select().single();
     if (insErr) throw insErr;
 

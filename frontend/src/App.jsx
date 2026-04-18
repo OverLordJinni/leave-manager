@@ -21,6 +21,15 @@ function fmt(s) {
 function uid() { return Math.random().toString(36).slice(2,9); }
 const today = () => new Date().toISOString().split('T')[0];
 
+// Decode urgent_task from stored reason (mirrors backend encoding)
+const UT_MARKER = '\n__UT__:';
+function splitReason(str) {
+  if (!str) return { reason: '', urgentTask: '' };
+  const idx = str.indexOf(UT_MARKER);
+  if (idx === -1) return { reason: str, urgentTask: '' };
+  return { reason: str.slice(0, idx), urgentTask: str.slice(idx + UT_MARKER.length) };
+}
+
 // ─── WebAuthn helpers ─────────────────────────────────────────────────────────
 const b64urlToUint8 = s => {
   const b64 = s.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(s.length/4)*4,'=');
@@ -770,12 +779,13 @@ function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismi
 }
 
 // ─── History Row ──────────────────────────────────────────────────────────────
-function HistoryRow({ item, onDelete, style:sx }) {
+function HistoryRow({ item, onDelete, onViber, style:sx }) {
   const [C] = useTheme();
   const color = item.typeColor || item.type_color;
   const name  = item.typeName  || item.type_name;
   const sd    = item.startDate || item.start_date;
   const ed    = item.endDate   || item.end_date;
+  const { reason: reasonText, urgentTask } = splitReason(item.reason);
   return (
     <div style={{
       background:C.surface, borderRadius:16, padding:'14px 16px',
@@ -793,8 +803,14 @@ function HistoryRow({ item, onDelete, style:sx }) {
           <Pill color={color} label={`${item.days}d`}/>
         </div>
         <p style={{ fontSize:12, color:C.muted, fontWeight:500 }}>{fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''}</p>
-        {item.reason && <p style={{ fontSize:11, color:C.muted, marginTop:2, fontStyle:'italic', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', opacity:.7 }}>"{item.reason}"</p>}
+        {reasonText && <p style={{ fontSize:11, color:C.muted, marginTop:2, fontStyle:'italic', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', opacity:.7 }}>"{reasonText}"</p>}
+        {urgentTask && <p style={{ fontSize:11, color:C.orange, marginTop:2, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>⚡ {urgentTask}</p>}
       </div>
+      {onViber && (
+        <button onClick={e=>{e.stopPropagation();onViber(item);}} style={{ background:`rgba(115,96,242,0.10)`, border:`1px solid ${C.viber}30`, cursor:'pointer', padding:'7px 8px', borderRadius:10, flexShrink:0, transition:'all .15s' }}>
+          <Icon n="viber" size={15} color={C.viber}/>
+        </button>
+      )}
       {onDelete && (
         <button onClick={()=>onDelete(item.id)} style={{ background:C.faint, border:`1px solid ${C.border}`, cursor:'pointer', padding:'7px 8px', borderRadius:10, flexShrink:0, transition:'all .15s' }}>
           <Icon n="trash" size={15} color={C.muted}/>
@@ -807,22 +823,53 @@ function HistoryRow({ item, onDelete, style:sx }) {
 // ─── Apply Success + Viber ────────────────────────────────────────────────────
 function ApplySuccess({ entry, links, onSuccess }) {
   const [C] = useTheme();
-  const [viberOpened, setViberOpened] = useState(false);
+  const [sentIds, setSentIds] = useState(new Set());
+  const [queue,   setQueue]   = useState([]);
+  const queueRef = useRef([]);
+  queueRef.current = queue;
   const sd = entry.startDate||entry.start_date, ed = entry.endDate||entry.end_date;
 
-  // Auto-open Viber for the first recipient on iOS PWA.
-  // 800ms gives the success animation time to complete before switching apps.
+  // Auto-open first recipient 800ms after mount
   useEffect(() => {
     if (links.length > 0) {
       const t = setTimeout(() => {
-        setViberOpened(true);
+        setSentIds(new Set([links[0].id]));
         window.location.href = links[0].viberUrl;
       }, 800);
       return () => clearTimeout(t);
     }
   }, []);
 
-  function openViber(url) { setViberOpened(true); window.location.href = url; }
+  // When user returns from Viber, auto-open next queued recipient
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== 'visible') return;
+      const q = queueRef.current;
+      if (!q.length) return;
+      const [next, ...rest] = q;
+      setQueue(rest);
+      setTimeout(() => {
+        setSentIds(prev => new Set([...prev, next.id]));
+        window.location.href = next.viberUrl;
+      }, 800);
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
+  function openViber(url, id) { setSentIds(prev => new Set([...prev, id])); window.location.href = url; }
+
+  function notifyAll() {
+    const unsent = links.filter(lk => !sentIds.has(lk.id));
+    if (!unsent.length) return;
+    const [first, ...rest] = unsent;
+    setQueue(rest);
+    setSentIds(prev => new Set([...prev, first.id]));
+    window.location.href = first.viberUrl;
+  }
+
+  const sentCount = links.filter(lk => sentIds.has(lk.id)).length;
+  const allSent   = links.length > 0 && sentCount === links.length;
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -838,38 +885,52 @@ function ApplySuccess({ entry, links, onSuccess }) {
 
       {links.length > 0 ? (
         <>
-          {!viberOpened && (
+          {allSent ? (
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:C.greenSoft, borderRadius:12, border:`1px solid ${C.green}30`, animation:'fadeIn .3s ease' }}>
+              <Icon n="check" size={16} color={C.green}/>
+              <p style={{ fontSize:13, color:C.green, fontWeight:600 }}>All {links.length} contact{links.length>1?'s':''} notified!</p>
+            </div>
+          ) : sentCount === 0 ? (
             <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'rgba(115,96,242,0.08)', borderRadius:12, border:`1px solid ${C.viber}25`, animation:'fadeIn .3s ease' }}>
               <div style={{ width:8, height:8, borderRadius:'50%', background:C.viber, animation:'pulse 1.5s infinite', flexShrink:0 }}/>
               <p style={{ fontSize:13, color:C.viber, fontWeight:600 }}>Opening Viber for {links[0].recipientName}…</p>
             </div>
-          )}
+          ) : null}
+
           <Card style={{ padding:'13px 16px', background:C.faint }}>
             <p style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Message Preview</p>
             <p style={{ fontSize:13, color:C.textSub, lineHeight:1.6, whiteSpace:'pre-wrap' }}>{links[0].messagePreview}</p>
           </Card>
-          <p style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>
-            {links.length > 1 ? 'Tap to notify via Viber' : 'Notify via Viber'}
-          </p>
-          {links.map((lk, i) => (
-            <button key={lk.id} onClick={() => openViber(lk.viberUrl)}
-              style={{ display:'block', width:'100%', background:'none', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}>
-              <Card style={{ padding:'16px', background:'linear-gradient(135deg,rgba(115,96,242,0.12),rgba(155,139,255,0.10))', border:`1.5px solid ${C.viber}50`, transition:'all .15s' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                  <div style={{ width:46, height:46, borderRadius:14, background:'linear-gradient(135deg,#7360F2,#9B8BFF)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 4px 12px rgba(115,96,242,0.35)' }}>
-                    <Icon n="viber" size={22} color="#fff"/>
+
+          {links.length > 1 && !allSent && (
+            <Btn full variant="viber" onClick={notifyAll}>
+              <Icon n="viber" size={16} color="#fff"/>
+              {sentCount > 0 ? `Continue Notifying (${sentCount}/${links.length} done)` : `Notify All (${links.length} contacts)`}
+            </Btn>
+          )}
+
+          {links.map(lk => {
+            const sent = sentIds.has(lk.id);
+            return (
+              <button key={lk.id} onClick={() => openViber(lk.viberUrl, lk.id)}
+                style={{ display:'block', width:'100%', background:'none', border:'none', padding:0, cursor:'pointer', textAlign:'left' }}>
+                <Card style={{ padding:'14px 16px', background: sent ? C.greenSoft : 'linear-gradient(135deg,rgba(115,96,242,0.12),rgba(155,139,255,0.10))', border:`1.5px solid ${sent ? C.green+'40' : C.viber+'50'}`, transition:'all .2s ease' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <div style={{ width:46, height:46, borderRadius:14, background: sent ? C.greenSoft : 'linear-gradient(135deg,#7360F2,#9B8BFF)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow: sent ? 'none' : '0 4px 12px rgba(115,96,242,0.35)' }}>
+                      <Icon n={sent ? 'check' : 'viber'} size={22} color={sent ? C.green : '#fff'}/>
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontWeight:700, color: sent ? C.green : C.viber, fontSize:15 }}>{lk.recipientName}</p>
+                      <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{lk.phone}</p>
+                    </div>
+                    <div style={{ background: sent ? C.green : C.viber, borderRadius:10, padding:'6px 14px' }}>
+                      <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{sent ? '✓ Sent' : 'Open →'}</span>
+                    </div>
                   </div>
-                  <div style={{ flex:1 }}>
-                    <p style={{ fontWeight:700, color:C.viber, fontSize:15 }}>{lk.recipientName}</p>
-                    <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{lk.phone}</p>
-                  </div>
-                  <div style={{ background:C.viber, borderRadius:10, padding:'6px 14px' }}>
-                    <span style={{ fontSize:13, fontWeight:700, color:'#fff' }}>{i===0 && viberOpened ? 'Re-open →' : 'Open →'}</span>
-                  </div>
-                </div>
-              </Card>
-            </button>
-          ))}
+                </Card>
+              </button>
+            );
+          })}
         </>
       ) : (
         <Card style={{ padding:'14px 16px', border:`1.5px dashed ${C.border}`, textAlign:'center' }}>
@@ -885,7 +946,7 @@ function ApplySuccess({ entry, links, onSuccess }) {
 function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast, onTitleChange }) {
   const [C] = useTheme();
   const t = today();
-  const [form, setForm]   = useState({ typeId:leaveTypes[0]?.id||'', start:t, end:t, reason:'' });
+  const [form, setForm]   = useState({ typeId:leaveTypes[0]?.id||'', start:t, end:t, reason:'', urgentTask:'' });
   const [sub, setSub]     = useState(false);
   const [links, setLinks] = useState(null);
   const [entry, setEntry] = useState(null);
@@ -902,9 +963,10 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast, onTitleC
 
   async function submit() {
     if (!sel||days<=0||over) return;
+    if (!form.reason.trim()) { toast?.('Reason is required.', 'error'); return; }
     setSub(true);
     try {
-      const newEntry = await api.applyLeave({ leaveTypeId:form.typeId, startDate:form.start, endDate:form.end, reason:form.reason });
+      const newEntry = await api.applyLeave({ leaveTypeId:form.typeId, startDate:form.start, endDate:form.end, reason:form.reason, urgentTask:form.urgentTask });
       setEntry(newEntry);
       if (recipients.length > 0) {
         const { links:vl } = await api.getViberLinks(newEntry.id);
@@ -941,19 +1003,135 @@ function ApplyForm({ leaveTypes, recipients, onClose, onSuccess, toast, onTitleC
           </div>
         </Card>
       )}
-      <TInput label="Reason (optional)" value={form.reason} placeholder="e.g. Family vacation, medical…" onChange={e=>set('reason',e.target.value)}/>
-      <Btn full onClick={submit} disabled={days<=0||over} loading={sub} style={{ marginTop:4, padding:16, fontSize:16, borderRadius:16 }}>
+      <TInput label="Reason *" value={form.reason} placeholder="e.g. Medical, sick, vacation…" onChange={e=>set('reason',e.target.value)}/>
+      <TInput label="Urgent Task (optional)" value={form.urgentTask} placeholder="e.g. Submit report by Friday" onChange={e=>set('urgentTask',e.target.value)}/>
+      <Btn full onClick={submit} disabled={days<=0||over||!form.reason.trim()} loading={sub} style={{ marginTop:4, padding:16, fontSize:16, borderRadius:16 }}>
         Submit Leave
       </Btn>
     </div>
   );
 }
 
-// ─── History Screen ───────────────────────────────────────────────────────────
-function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
+// ─── History Viber Sheet ──────────────────────────────────────────────────────
+function HistoryViberSheet({ entry, onClose }) {
   const [C] = useTheme();
-  const [filter, setFilter]   = useState('all');
-  const [deleting, setDel]    = useState(null);
+  const [links,   setLinks]   = useState(null);
+  const [sentIds, setSentIds] = useState(new Set());
+  const [queue,   setQueue]   = useState([]);
+  const queueRef = useRef([]);
+  queueRef.current = queue;
+
+  const sd    = entry.start_date || entry.startDate;
+  const ed    = entry.end_date   || entry.endDate;
+  const color = entry.type_color || entry.typeColor;
+  const name  = entry.type_name  || entry.typeName;
+
+  useEffect(() => {
+    api.getViberLinks(entry.id)
+      .then(r => setLinks(r.links))
+      .catch(() => setLinks([]));
+  }, [entry.id]);
+
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== 'visible') return;
+      const q = queueRef.current;
+      if (!q.length) return;
+      const [next, ...rest] = q;
+      setQueue(rest);
+      setTimeout(() => {
+        setSentIds(prev => new Set([...prev, next.id]));
+        window.location.href = next.viberUrl;
+      }, 800);
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
+  function openViber(url, id) { setSentIds(prev => new Set([...prev, id])); window.location.href = url; }
+
+  function notifyAll() {
+    if (!links?.length) return;
+    const unsent = links.filter(lk => !sentIds.has(lk.id));
+    if (!unsent.length) return;
+    const [first, ...rest] = unsent;
+    setQueue(rest);
+    setSentIds(prev => new Set([...prev, first.id]));
+    window.location.href = first.viberUrl;
+  }
+
+  const sentCount = (links || []).filter(lk => sentIds.has(lk.id)).length;
+  const allSent   = links?.length > 0 && sentCount === links.length;
+
+  return (
+    <Sheet title="Notify via Viber" onClose={onClose}>
+      <div style={{ background:`${color}12`, borderRadius:14, padding:'12px 14px', marginBottom:16, border:`1px solid ${color}28` }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ width:38, height:38, borderRadius:11, background:`${color}22`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <Icon n="cal" size={18} color={color}/>
+          </div>
+          <div>
+            <p style={{ fontWeight:700, fontSize:14, color:C.text }}>{name}</p>
+            <p style={{ fontSize:12, color:C.muted }}>{fmt(sd)}{sd!==ed?` → ${fmt(ed)}`:''} · {entry.days} day{entry.days!==1?'s':''}</p>
+          </div>
+        </div>
+      </div>
+
+      {links === null ? (
+        <Spinner label="Loading contacts…"/>
+      ) : links.length === 0 ? (
+        <Card style={{ padding:'14px 16px', border:`1.5px dashed ${C.border}`, textAlign:'center' }}>
+          <p style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>No Viber contacts yet.<br/>Add them in <strong>Settings → Viber</strong>.</p>
+        </Card>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {allSent ? (
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:C.greenSoft, borderRadius:12, border:`1px solid ${C.green}30` }}>
+              <Icon n="check" size={16} color={C.green}/>
+              <p style={{ fontSize:13, color:C.green, fontWeight:600 }}>All {links.length} contact{links.length>1?'s':''} notified!</p>
+            </div>
+          ) : links.length > 1 ? (
+            <Btn full variant="viber" onClick={notifyAll}>
+              <Icon n="viber" size={16} color="#fff"/>
+              {sentCount > 0 ? `Continue (${sentCount}/${links.length} done)` : `Notify All (${links.length} contacts)`}
+            </Btn>
+          ) : null}
+
+          {links.map(lk => {
+            const sent = sentIds.has(lk.id);
+            return (
+              <button key={lk.id} onClick={() => !sent && openViber(lk.viberUrl, lk.id)}
+                style={{ display:'block', width:'100%', background:'none', border:'none', padding:0, cursor: sent ? 'default' : 'pointer', textAlign:'left' }}>
+                <Card style={{ padding:'14px 16px', background: sent ? C.greenSoft : 'linear-gradient(135deg,rgba(115,96,242,0.10),rgba(155,139,255,0.08))', border:`1.5px solid ${sent ? C.green+'40' : C.viber+'40'}`, transition:'all .2s ease' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <div style={{ width:42, height:42, borderRadius:13, background: sent ? C.greenSoft : 'linear-gradient(135deg,#7360F2,#9B8BFF)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow: sent ? 'none' : '0 3px 10px rgba(115,96,242,0.3)' }}>
+                      <Icon n={sent ? 'check' : 'viber'} size={20} color={sent ? C.green : '#fff'}/>
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontWeight:700, fontSize:14, color: sent ? C.green : C.viber }}>{lk.recipientName}</p>
+                      <p style={{ fontSize:12, color:C.muted, marginTop:1 }}>{lk.phone}</p>
+                    </div>
+                    <div style={{ background: sent ? C.green : C.viber, borderRadius:10, padding:'5px 12px' }}>
+                      <span style={{ fontSize:12, fontWeight:700, color:'#fff' }}>{sent ? '✓ Sent' : 'Open →'}</span>
+                    </div>
+                  </div>
+                </Card>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <Btn full variant="ghost" onClick={onClose} style={{ marginTop:12 }}>Done</Btn>
+    </Sheet>
+  );
+}
+
+// ─── History Screen ───────────────────────────────────────────────────────────
+function HistoryScreen({ leaveTypes, history, onRefresh, toast, recipients }) {
+  const [C] = useTheme();
+  const [filter,      setFilter]  = useState('all');
+  const [deleting,    setDel]     = useState(null);
+  const [viberEntry,  setViber]   = useState(null);
 
   async function cancel(id) {
     setDel(id);
@@ -1014,11 +1192,17 @@ function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
         </div>
       )}
 
-      <p style={{ fontSize:12, color:C.muted, fontWeight:500 }}>Tap 🗑 to cancel a leave and restore the balance.</p>
+      <p style={{ fontSize:12, color:C.muted, fontWeight:500 }}>Tap <Icon n="viber" size={12} color={C.viber}/> to resend via Viber · 🗑 to cancel.</p>
       {filtered.length===0
         ? <p style={{ textAlign:'center', color:C.muted, fontSize:13, padding:'20px 0' }}>No entries for this type.</p>
-        : filtered.map(h => <HistoryRow key={h.id} item={h} onDelete={deleting===h.id ? null : cancel}/>)
+        : filtered.map(h => (
+            <HistoryRow key={h.id} item={h}
+              onViber={recipients?.length > 0 ? setViber : null}
+              onDelete={deleting===h.id ? null : cancel}/>
+          ))
       }
+
+      {viberEntry && <HistoryViberSheet entry={viberEntry} onClose={()=>setViber(null)}/>}
     </div>
   );
 }
@@ -1457,7 +1641,7 @@ export default function App() {
         {/* Content */}
         <div style={{ padding:'20px 20px calc(env(safe-area-inset-bottom, 0px) + 90px)', animation:'fadeIn .3s ease' }}>
           {tab==='home'    && <HomeScreen leaveTypes={leaveTypes} settings={settings} history={history} onApply={()=>setApplyOpen(true)} justReset={justReset} onDismissReset={()=>setJustReset(false)}/>}
-          {tab==='history' && <HistoryScreen leaveTypes={leaveTypes} history={history} onRefresh={loadAll} toast={showToast}/>}
+          {tab==='history' && <HistoryScreen leaveTypes={leaveTypes} history={history} recipients={recipients} onRefresh={loadAll} toast={showToast}/>}
         </div>
 
         {/* Bottom Nav */}

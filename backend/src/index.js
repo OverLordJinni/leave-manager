@@ -24,9 +24,9 @@ const isProd = process.env.NODE_ENV === 'production';
 const FRONTEND_URL = process.env.FRONTEND_URL;
 if (isProd && !FRONTEND_URL) { console.error('FATAL: FRONTEND_URL must be set.'); process.exit(1); }
 
-// Trust Render + Netlify proxy layers so rate-limiters use the real client IP
-// (without this, every request looks like it comes from Netlify's proxy IP)
-app.set('trust proxy', true);
+// Trust Render + Netlify proxy layers so rate-limiters use the real client IP.
+// In production: trust=1 (one proxy hop). In dev: trust=false (no proxy).
+app.set('trust proxy', isProd ? 1 : false);
 
 // HTTP → HTTPS redirect in production
 app.use((req, res, next) => {
@@ -98,7 +98,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, async () => {
-  console.log(`Leave Manager API — port ${PORT}`);
+app.listen(PORT, '0.0.0.0', async () => {
+  console.log(`Leave Manager API — port ${PORT} (0.0.0.0)`);
   await seedDefaults();
 });

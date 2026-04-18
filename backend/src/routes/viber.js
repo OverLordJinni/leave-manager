@@ -82,8 +82,8 @@ router.post('/links', async (req, res) => {
       { data: leaveTypes, error: e3 },
       { data: user },
     ] = await Promise.all([
-      supabase.from('leave_history').select('*').eq('id', leaveHistoryId).single(),
-      supabase.from('recipients').select('*').order('created_at', { ascending: true }),
+      supabase.from('leave_history').select('*').eq('id', leaveHistoryId).eq('user_id', req.userId).single(),
+      supabase.from('recipients').select('*').eq('user_id', req.userId).order('created_at', { ascending: true }),
       supabase.from('leave_types').select('*').order('order', { ascending: true }),
       req.userId
         ? supabase.from('users').select('name, email').eq('id', req.userId).single()
@@ -118,9 +118,10 @@ router.get('/open/:recipientId', async (req, res) => {
       { data: leaveTypes },
       { data: user },
     ] = await Promise.all([
-      supabase.from('recipients').select('*').eq('id', req.params.recipientId).single(),
+      supabase.from('recipients').select('*').eq('id', req.params.recipientId).eq('user_id', req.userId).single(),
       req.query.leaveId
-        ? supabase.from('leave_history').select('*').eq('id', req.query.leaveId).single()
+        ? supabase.from('leave_history').select('*')
+            .eq('id', req.query.leaveId).eq('user_id', req.userId).single()
         : Promise.resolve({ data: null }),
       supabase.from('leave_types').select('*').order('order', { ascending: true }),
       req.userId
