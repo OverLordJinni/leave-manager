@@ -1,0 +1,183 @@
+/* ============================================================
+   Leave Manager — Design tokens
+   Warm editorial minimalism. Paper + ink + one accent.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+
+:root {
+  --ff-display: 'Instrument Serif', 'Times New Roman', serif;
+  --ff-text: 'Geist', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --ff-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --fs-xs: 11px;
+  --fs-sm: 13px;
+  --fs-base: 15px;
+  --fs-md: 17px;
+  --fs-lg: 22px;
+  --fs-xl: 32px;
+  --fs-2xl: 48px;
+  --fs-3xl: 72px;
+
+  --lh-tight: 1;
+  --lh-snug: 1.15;
+  --lh-body: 1.5;
+  --lh-loose: 1.7;
+
+  --ls-display: -0.02em;
+  --ls-body: 0;
+  --ls-micro: 0.12em;
+
+  /* Light palette */
+  --paper:      #F6F2EA;
+  --paper-2:    #EFE9DD;
+  --surface:    #FFFFFF;
+  --ink:        #131312;
+  --ink-2:      #55544F;
+  --ink-3:      #8A887E;
+  --ink-4:      #C6C2B6;
+  --rule:       #E4DFD2;
+
+  --accent:     #0F5F55;
+  --accent-2:   #0A7D6B;
+  --accent-soft:#E1EDE9;
+  --accent-ink: #FFFFFF;
+
+  --ok:         #3A6F3B;
+  --ok-soft:    #E4EEDD;
+  --warn:       #A85E1E;
+  --warn-soft:  #F6E7D4;
+  --danger:     #8E2A2A;
+  --danger-soft:#F3DDDA;
+
+  --viber:      #6949C9;
+  --viber-soft: #E8E2F7;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  --border: 1px solid var(--rule);
+  --border-strong: 1px solid var(--ink-4);
+
+  --shadow-0: none;
+  --shadow-1: 0 1px 0 rgba(19,19,18,0.04), 0 1px 2px rgba(19,19,18,0.03);
+  --shadow-2: 0 2px 0 rgba(19,19,18,0.04), 0 6px 18px rgba(19,19,18,0.06);
+  --shadow-focus: 0 0 0 3px rgba(15,95,85,0.18);
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+
+  --ease-out: cubic-bezier(.2,.7,.2,1);
+  --ease-spring: cubic-bezier(.34,1.4,.5,1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 360ms;
+}
+
+:root.dark,
+[data-theme="dark"] {
+  --paper:      #15140F;
+  --paper-2:    #1E1C17;
+  --surface:    #1A1813;
+  --ink:        #EFEADB;
+  --ink-2:      #B5B0A1;
+  --ink-3:      #7A7667;
+  --ink-4:      #3A3730;
+  --rule:       #2A2822;
+
+  --accent:     #5CC9B5;
+  --accent-2:   #7FDCC9;
+  --accent-soft:#143530;
+  --accent-ink: #0A2A25;
+
+  --ok:         #8BC48C;
+  --ok-soft:    #1E2E1E;
+  --warn:       #E0A264;
+  --warn-soft:  #33240F;
+  --danger:     #D98080;
+  --danger-soft:#2E1717;
+
+  --viber:      #AFA0E6;
+  --viber-soft: #1E1A30;
+
+  --shadow-1: 0 1px 0 rgba(0,0,0,0.3);
+  --shadow-2: 0 8px 24px rgba(0,0,0,0.35);
+  --shadow-focus: 0 0 0 3px rgba(92,201,181,0.25);
+}
+
+/* ─── Reset + base ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { overscroll-behavior: none; overflow-x: hidden; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--ff-text);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--fs-base);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+input, select, button, textarea { font-family: var(--ff-text); color: var(--ink); }
+button, a { touch-action: manipulation; }
+button { -webkit-user-select: none; user-select: none; cursor: pointer; }
+input[type=date]::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
+
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-thumb { background: var(--ink-4); border-radius: 3px; }
+
+/* ─── Type roles ──────────────────────────────────────────── */
+.lm-display, .lm-h1, .lm-h2 {
+  font-family: var(--ff-display);
+  color: var(--ink);
+  letter-spacing: var(--ls-display);
+  line-height: var(--lh-snug);
+  font-weight: 400;
+  font-style: normal;
+}
+.lm-display-xl { font-family: var(--ff-display); font-size: var(--fs-3xl); line-height: 0.95; letter-spacing: -0.03em; }
+.lm-display-lg { font-family: var(--ff-display); font-size: var(--fs-2xl); line-height: 1.0; letter-spacing: -0.025em; }
+.lm-h1 { font-size: var(--fs-xl); }
+.lm-h2 { font-size: var(--fs-lg); }
+.lm-eyebrow {
+  font-family: var(--ff-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-micro);
+  font-weight: 500;
+}
+.lm-meta {
+  font-family: var(--ff-text);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  line-height: var(--lh-body);
+}
+.lm-num {
+  font-family: var(--ff-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Animations (sparse) ─────────────────────────────────── */
+@keyframes lmFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes lmSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes lmSpin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+.lm-press:active:not(:disabled) { transform: scale(.98); transition: transform var(--dur-fast) var(--ease-spring); }
+
+/* ─── Focus ring (visible on every interactive element) ───── */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 0;
+  box-shadow: var(--shadow-focus);
+}
