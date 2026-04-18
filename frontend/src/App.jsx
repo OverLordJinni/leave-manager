@@ -23,6 +23,22 @@ function fmt(s) {
 function uid() { return Math.random().toString(36).slice(2,9); }
 const today = () => new Date().toISOString().split('T')[0];
 
+async function copyText(s) {
+  if (!s) return false;
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(s); return true; }
+  } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = s; ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed'; ta.style.top = '-1000px';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+
 // ─── WebAuthn helpers ─────────────────────────────────────────────────────────
 const b64urlToUint8 = s => {
   const b64 = s.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(s.length/4)*4,'=');
@@ -73,6 +89,7 @@ function Icon({ name, size = 18, style }) {
     eye: <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></>,
     'eye-off': <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></>,
     mail: <><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></>,
+    copy: <><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -652,17 +669,36 @@ function HistoryRow({ item, onCancel, busy }) {
 }
 
 // ─── Apply ───────────────────────────────────────────────────────────────────
-function ApplySuccess({ entry, links, onClose }) {
+function ApplySuccess({ entry, links, onClose, toast }) {
   const sd = entry.startDate || entry.start_date;
   const ed = entry.endDate || entry.end_date;
   const typeName = entry.typeName || entry.type_name;
+  const message = links[0]?.messagePreview || '';
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (links.length > 0) {
+      copyText(message);
       const t = setTimeout(() => { window.location.href = links[0].viberUrl; }, 300);
       return () => clearTimeout(t);
     }
   }, []);
+
+  async function handleCopy() {
+    const ok = await copyText(message);
+    if (ok) {
+      setCopied(true);
+      toast?.('Message copied to clipboard.');
+      setTimeout(() => setCopied(false), 1600);
+    } else {
+      toast?.('Copy failed. Long-press the message to select it.', 'error');
+    }
+  }
+
+  async function openViber(lk) {
+    await copyText(message);
+    window.location.href = lk.viberUrl;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -681,14 +717,29 @@ function ApplySuccess({ entry, links, onClose }) {
       {links.length > 0 ? (
         <>
           <Card pad={14} style={{ background: 'var(--paper-2)' }}>
-            <div className="lm-eyebrow" style={{ marginBottom: 6 }}>Message preview</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <div className="lm-eyebrow">Message preview</div>
+              <button onClick={handleCopy} aria-label="Copy message" style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8,
+                padding: '4px 8px', color: copied ? 'var(--accent)' : 'var(--ink-2)',
+                fontFamily: 'var(--ff-text)', fontSize: 11, fontWeight: 600, letterSpacing: '-0.005em',
+                transition: 'color var(--dur), border-color var(--dur)',
+              }}>
+                <Icon name={copied ? 'check' : 'copy'} size={12}/>
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-              {links[0].messagePreview}
+              {message}
             </p>
           </Card>
+          <p className="lm-meta" style={{ fontSize: 12, marginTop: -6 }}>
+            The message is copied to your clipboard — paste it if Viber doesn't pre-fill.
+          </p>
           <div className="lm-eyebrow">Notify via Viber</div>
           {links.map(lk => (
-            <Card key={lk.id} pad={14} onClick={() => { window.location.href = lk.viberUrl; }}
+            <Card key={lk.id} pad={14} onClick={() => openViber(lk)}
               style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--viber-soft)', color: 'var(--viber)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <Icon name="message-circle" size={16}/>
@@ -753,7 +804,7 @@ function ApplyScreen({ leaveTypes, recipients, onClose, onSuccess, toast }) {
     </div>
   );
 
-  if (entry && links !== null) return <ApplySuccess entry={entry} links={links} onClose={onSuccess}/>;
+  if (entry && links !== null) return <ApplySuccess entry={entry} links={links} onClose={onSuccess} toast={toast}/>;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
