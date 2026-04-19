@@ -12,23 +12,29 @@ function dbErr(res, req, err) {
 
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('recipients').select('*').order('created_at', { ascending: true });
+    const { data, error } = await supabase.from('recipients')
+      .select('*').eq('user_id', req.userId)
+      .order('created_at', { ascending: true });
     if (error) throw error;
     res.json(data);
   } catch (err) { dbErr(res, req, err); }
 });
 
 router.post('/', async (req, res) => {
-  const name  = clean(req.body.name,  80);
-  const phone = clean(req.body.phone, 20);
-  const errs  = [];
-  if (!name)                       errs.push('name is required');
-  if (!phone)                      errs.push('phone is required');
-  if (phone && !PHONE_RE.test(phone)) errs.push('phone must be E.164 format e.g. +66812345678');
+  const name    = clean(req.body.name,  80);
+  const rawPhone = clean(req.body.phone, 20);
+  // Accept human-typed phones with spaces/dashes; store E.164.
+  const phone   = rawPhone.replace(/[\s-]/g, '');
+  const errs    = [];
+  if (!name)                          errs.push('name is required');
+  if (!phone)                         errs.push('phone is required');
+  if (phone && !PHONE_RE.test(phone)) errs.push('phone must be E.164 format e.g. +9607712345');
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
   try {
-    const { data, error } = await supabase.from('recipients').insert({ name, phone }).select().single();
+    const { data, error } = await supabase.from('recipients')
+      .insert({ user_id: req.userId, name, phone })
+      .select().single();
     if (error) throw error;
     res.status(201).json(data);
   } catch (err) { dbErr(res, req, err); }
@@ -36,7 +42,8 @@ router.post('/', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const { error } = await supabase.from('recipients').delete().eq('id', req.params.id);
+    const { error } = await supabase.from('recipients')
+      .delete().eq('id', req.params.id).eq('user_id', req.userId);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { dbErr(res, req, err); }

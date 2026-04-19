@@ -185,16 +185,20 @@ async function handlePasskeyRegister(req, res) {
     return res.status(400).json({ error: 'Challenge expired — request a new one' });
   pendingChallenges.delete(challengeId);
 
-  // Upsert: one passkey per user
+  // One passkey per user — replace any existing, then insert.
+  // Done as delete+insert (rather than upsert with onConflict) because the
+  // unique constraint on passkey_credentials isn't consistent across schemas.
+  const { error: delErr } = await supabase
+    .from('passkey_credentials').delete().eq('user_id', sess.userId);
+  if (delErr) {
+    console.error(JSON.stringify({ event: 'passkey_register_error', stage: 'delete', error: delErr.message }));
+    return res.status(500).json({ error: 'Internal server error' });
+  }
   const { error } = await supabase
     .from('passkey_credentials')
-    .upsert(
-      { user_id: sess.userId, credential_id: credentialId, public_key: publicKey },
-      { onConflict: 'user_id' }
-    );
-
+    .insert({ user_id: sess.userId, credential_id: credentialId, public_key: publicKey });
   if (error) {
-    console.error(JSON.stringify({ event: 'passkey_register_error', error: error.message }));
+    console.error(JSON.stringify({ event: 'passkey_register_error', stage: 'insert', error: error.message }));
     return res.status(500).json({ error: 'Internal server error' });
   }
 

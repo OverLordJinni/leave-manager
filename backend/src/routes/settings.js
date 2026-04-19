@@ -22,7 +22,8 @@ function dbErr(res, req, err) {
 
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('settings').select('key, value');
+    const { data, error } = await supabase.from('settings')
+      .select('key, value').eq('user_id', req.userId);
     if (error) throw error;
     res.json(Object.fromEntries((data||[]).map(r => [r.key, r.value])));
   } catch (err) { dbErr(res, req, err); }
@@ -43,9 +44,13 @@ router.put('/', async (req, res) => {
 
   try {
     await Promise.all(entries.map(([key, value]) =>
-      supabase.from('settings').upsert({ key, value: String(value) }, { onConflict: 'key' })
+      supabase.from('settings').upsert(
+        { user_id: req.userId, key, value: String(value) },
+        { onConflict: 'user_id,key' }
+      )
     ));
-    const { data, error } = await supabase.from('settings').select('key, value');
+    const { data, error } = await supabase.from('settings')
+      .select('key, value').eq('user_id', req.userId);
     if (error) throw error;
     res.json(Object.fromEntries((data||[]).map(r => [r.key, r.value])));
   } catch (err) { dbErr(res, req, err); }

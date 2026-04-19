@@ -34,11 +34,12 @@ function encodeReason(reason, urgentTask) {
 }
 
 // ── Contract renewal reset ────────────────────────────────────────────────────
-async function checkAndApplyReset() {
-  // Read both contractRenewal and lastResetDate together
+async function checkAndApplyReset(userId) {
+  // Read both contractRenewal and lastResetDate for THIS user
   const { data: rows } = await supabase
     .from('settings')
     .select('key, value')
+    .eq('user_id', userId)
     .in('key', ['contractRenewal', 'lastResetDate']);
 
   const byKey      = Object.fromEntries((rows || []).map(r => [r.key, r.value]));
@@ -50,25 +51,33 @@ async function checkAndApplyReset() {
   const due   = new Date(renewalDate); due.setHours(0,0,0,0);
   if (today < due) return { reset: false };
 
-  // Guard against double-reset: if lastResetDate already equals renewalDate, skip
+  // Guard against double-reset
   if (lastReset === renewalDate) return { reset: false };
 
   const next = addOneYear(renewalDate);
-  // Write lastResetDate first so concurrent requests see the guard immediately
-  await supabase.from('settings').upsert({ key: 'lastResetDate', value: renewalDate }, { onConflict: 'key' });
+  await supabase.from('settings').upsert(
+    { user_id: userId, key: 'lastResetDate', value: renewalDate },
+    { onConflict: 'user_id,key' }
+  );
   await Promise.all([
-    supabase.from('leave_types').update({ used: 0 }).neq('id', '00000000-0000-0000-0000-000000000000'),
-    supabase.from('settings').upsert({ key: 'contractRenewal', value: next }, { onConflict: 'key' }),
+    supabase.from('leave_types').update({ used: 0 }).eq('user_id', userId),
+    supabase.from('settings').upsert(
+      { user_id: userId, key: 'contractRenewal', value: next },
+      { onConflict: 'user_id,key' }
+    ),
   ]);
-  console.log(JSON.stringify({ event: 'leave_reset', next }));
+  console.log(JSON.stringify({ event: 'leave_reset', userId, next }));
   return { reset: true };
 }
 
 // GET /api/leave/types
 router.get('/types', async (req, res) => {
   try {
-    const resetInfo = await checkAndApplyReset();
-    const { data, error } = await supabase.from('leave_types').select('*').order('order', { ascending: true });
+    const resetInfo = await checkAndApplyReset(req.userId);
+    const { data, error } = await supabase
+      .from('leave_types').select('*')
+      .eq('user_id', req.userId)
+      .order('order', { ascending: true });
     if (error) throw error;
     res.json({ types: data, resetOccurred: resetInfo.reset });
   } catch (err) { dbErr(res, req, err); }
@@ -86,9 +95,11 @@ router.post('/types', async (req, res) => {
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
   try {
-    const { count } = await supabase.from('leave_types').select('*', { count: 'exact', head: true });
+    const { count } = await supabase
+      .from('leave_types').select('*', { count: 'exact', head: true })
+      .eq('user_id', req.userId);
     const { data, error } = await supabase.from('leave_types')
-      .insert({ name, total, used: 0, color: color||'#2563eb', order: count||0 })
+      .insert({ user_id: req.userId, name, total, used: 0, color: color||'#2563eb', order: count||0 })
       .select().single();
     if (error) throw error;
     res.status(201).json(data);
@@ -113,7 +124,8 @@ router.put('/types/:id', async (req, res) => {
 
   try {
     const { data, error } = await supabase.from('leave_types').update(patch)
-      .eq('id', req.params.id).select().single();
+      .eq('id', req.params.id).eq('user_id', req.userId)
+      .select().single();
     if (error) throw error;
     res.json(data);
   } catch (err) { dbErr(res, req, err); }
@@ -122,7 +134,8 @@ router.put('/types/:id', async (req, res) => {
 // DELETE /api/leave/types/:id
 router.delete('/types/:id', async (req, res) => {
   try {
-    const { error } = await supabase.from('leave_types').delete().eq('id', req.params.id);
+    const { error } = await supabase.from('leave_types')
+      .delete().eq('id', req.params.id).eq('user_id', req.userId);
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) { dbErr(res, req, err); }
@@ -132,7 +145,8 @@ router.delete('/types/:id', async (req, res) => {
 router.get('/history', async (req, res) => {
   try {
     const { data, error } = await supabase.from('leave_history')
-      .select('*').order('applied_at', { ascending: false });
+      .select('*').eq('user_id', req.userId)
+      .order('applied_at', { ascending: false });
     if (error) throw error;
     res.json(data);
   } catch (err) { dbErr(res, req, err); }
@@ -150,12 +164,12 @@ router.post('/apply', async (req, res) => {
   if (!isDate(startDate))     errs.push('startDate must be YYYY-MM-DD');
   if (!isDate(endDate))       errs.push('endDate must be YYYY-MM-DD');
   if (startDate && endDate && endDate < startDate) errs.push('endDate must be >= startDate');
-  if (!reason)                errs.push('reason is required');
+  // reason is optional — the UI labels it as such.
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
   try {
     const { data: lt, error: ltErr } = await supabase.from('leave_types')
-      .select('*').eq('id', leaveTypeId).single();
+      .select('*').eq('id', leaveTypeId).eq('user_id', req.userId).single();
     if (ltErr || !lt) return res.status(404).json({ error: 'Leave type not found' });
 
     const days = countWeekdays(startDate, endDate);
@@ -165,13 +179,18 @@ router.post('/apply', async (req, res) => {
       return res.status(422).json({ error: 'Insufficient balance', remaining: lt.total - lt.used });
 
     const { data: entry, error: insErr } = await supabase.from('leave_history')
-      .insert({ leave_type_id: leaveTypeId, type_name: lt.name, type_color: lt.color,
-                start_date: startDate, end_date: endDate, days, reason: encodeReason(reason, urgentTask) })
+      .insert({
+        user_id: req.userId,
+        leave_type_id: leaveTypeId, type_name: lt.name, type_color: lt.color,
+        start_date: startDate, end_date: endDate, days,
+        reason: encodeReason(reason, urgentTask),
+      })
       .select().single();
     if (insErr) throw insErr;
 
     const { error: updErr } = await supabase.from('leave_types')
-      .update({ used: lt.used + days }).eq('id', leaveTypeId);
+      .update({ used: lt.used + days })
+      .eq('id', leaveTypeId).eq('user_id', req.userId);
     if (updErr) throw updErr;
 
     // Map snake_case → camelCase for frontend compatibility
@@ -193,17 +212,20 @@ router.post('/apply', async (req, res) => {
 router.delete('/history/:id', async (req, res) => {
   try {
     const { data: entry, error: fetchErr } = await supabase.from('leave_history')
-      .select('*').eq('id', req.params.id).single();
+      .select('*').eq('id', req.params.id).eq('user_id', req.userId).single();
     if (fetchErr || !entry) return res.status(404).json({ error: 'Not found' });
 
-    const { error: delErr } = await supabase.from('leave_history').delete().eq('id', req.params.id);
+    const { error: delErr } = await supabase.from('leave_history')
+      .delete().eq('id', req.params.id).eq('user_id', req.userId);
     if (delErr) throw delErr;
 
     // Decrement used count
-    const { data: lt } = await supabase.from('leave_types').select('used').eq('id', entry.leave_type_id).single();
+    const { data: lt } = await supabase.from('leave_types')
+      .select('used').eq('id', entry.leave_type_id).eq('user_id', req.userId).single();
     if (lt) {
-      await supabase.from('leave_types').update({ used: Math.max(0, lt.used - entry.days) })
-        .eq('id', entry.leave_type_id);
+      await supabase.from('leave_types')
+        .update({ used: Math.max(0, lt.used - entry.days) })
+        .eq('id', entry.leave_type_id).eq('user_id', req.userId);
     }
     res.json({ ok: true });
   } catch (err) { dbErr(res, req, err); }
