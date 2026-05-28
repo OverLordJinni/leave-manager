@@ -1,0 +1,7 @@
+# XcodeGen generates the project from project.yml — don't commit it
+*.xcodeproj/
+DerivedData/
+build/
+.DS_Store
+*.xcuserstate
+xcuserdata/
