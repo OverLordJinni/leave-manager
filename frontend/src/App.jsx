@@ -1,6 +1,7 @@
 // src/App.jsx — Leave Manager UI, redesigned to "warm editorial minimalism".
 // Paper + ink + one teal accent. No gradients. Hairlines over shadows.
 import { useState, useEffect, useRef } from 'react';
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import * as api from './api.js';
 import './tokens.css';
 
@@ -38,14 +39,6 @@ async function copyText(s) {
     return ok;
   } catch { return false; }
 }
-
-// ─── WebAuthn helpers ─────────────────────────────────────────────────────────
-const b64urlToUint8 = s => {
-  const b64 = s.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(s.length/4)*4,'=');
-  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-};
-const uint8ToB64url = u =>
-  btoa(String.fromCharCode(...new Uint8Array(u))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 function useTheme() {
@@ -377,15 +370,12 @@ function LoginForm({ onLogin, onSwitch }) {
     if (!window.PublicKeyCredential) { setErr('Passkeys are not supported on this browser.'); return; }
     setPkLoad(true); setErr('');
     try {
-      const { challenge, challengeId, rpId } = await api.getPasskeyChallenge();
-      const assertion = await navigator.credentials.get({
-        publicKey: { challenge: b64urlToUint8(challenge), rpId, allowCredentials: [], userVerification: 'required', timeout: 60000 },
-      });
-      if (!assertion) throw new Error('No credential returned');
-      await api.loginPasskey({ credentialId: assertion.id, challengeId, verified: true });
+      const options = await api.getPasskeyLoginChallenge();
+      const authResp = await startAuthentication({ optionsJSON: options });
+      await api.loginPasskey(authResp);
       onLogin();
     } catch (e) {
-      if (e.name === 'NotAllowedError') setErr('Passkey sign-in was cancelled.');
+      if (e.name === 'NotAllowedError' || e.name === 'AbortError') setErr('Passkey sign-in was cancelled.');
       else setErr(e.message || 'Passkey sign-in failed.');
     } finally { setPkLoad(false); }
   }
@@ -1191,28 +1181,13 @@ function AccountTab({ onLogout, toast }) {
     if (!window.PublicKeyCredential) { toast('Passkeys are not supported on this browser.', 'error'); return; }
     setPkLoad(true);
     try {
-      const { challenge, challengeId, rpId, rpName, userId } = await api.getPasskeyChallenge();
-      const userIdBytes = userId
-        ? new Uint8Array(userId.replace(/-/g, '').match(/.{2}/g).map(b => parseInt(b, 16)))
-        : crypto.getRandomValues(new Uint8Array(16));
-      const credential = await navigator.credentials.create({
-        publicKey: {
-          challenge: b64urlToUint8(challenge), rp: { id: rpId, name: rpName || 'Leave Manager' },
-          user: { id: userIdBytes, name: 'user', displayName: 'Leave Manager' },
-          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-          authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
-          timeout: 60000,
-        },
-      });
-      if (!credential) throw new Error('No credential created');
-      let pkBytes;
-      try { pkBytes = credential.response.getPublicKey?.() || credential.response.clientDataJSON; }
-      catch { pkBytes = credential.response.clientDataJSON; }
-      await api.registerPasskey({ credentialId: credential.id, publicKey: uint8ToB64url(pkBytes), challengeId });
+      const options = await api.getPasskeyRegisterChallenge();
+      const attResp = await startRegistration({ optionsJSON: options });
+      await api.registerPasskey(attResp);
       toast('Passkey registered. You can sign in with biometrics next time.');
       setPkStatus(true);
     } catch (e) {
-      if (e.name === 'NotAllowedError') toast('Passkey registration cancelled.', 'error');
+      if (e.name === 'NotAllowedError' || e.name === 'AbortError') toast('Passkey registration cancelled.', 'error');
       else toast(e.message || 'Failed to register passkey.', 'error');
     } finally { setPkLoad(false); }
   }

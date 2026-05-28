@@ -1,6 +1,6 @@
 // src/routes/viber.js
 const router = require('express').Router();
-const { supabase } = require('../db/supabase');
+const { sql } = require('../db/client');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -76,24 +76,18 @@ router.post('/links', async (req, res) => {
     return res.status(400).json({ error: 'leaveHistoryId required' });
 
   try {
-    const [
-      { data: entry,      error: e1 },
-      { data: recipients, error: e2 },
-      { data: leaveTypes, error: e3 },
-      { data: user },
-    ] = await Promise.all([
-      supabase.from('leave_history').select('*').eq('id', leaveHistoryId).eq('user_id', req.userId).single(),
-      supabase.from('recipients').select('*').eq('user_id', req.userId).order('created_at', { ascending: true }),
-      supabase.from('leave_types').select('*').order('order', { ascending: true }),
-      req.userId
-        ? supabase.from('users').select('name, email').eq('id', req.userId).single()
-        : Promise.resolve({ data: null }),
+    const [entryRows, recipients, leaveTypes, userRows] = await Promise.all([
+      sql`SELECT id, user_id, leave_type_id, type_name, type_color,
+                 start_date::text AS start_date, end_date::text AS end_date, days, reason, applied_at
+          FROM leave_history WHERE id = ${leaveHistoryId} AND user_id = ${req.userId}`,
+      sql`SELECT * FROM recipients WHERE user_id = ${req.userId} ORDER BY created_at ASC`,
+      sql`SELECT * FROM leave_types WHERE user_id = ${req.userId} ORDER BY "order" ASC`,
+      sql`SELECT name, email FROM users WHERE id = ${req.userId}`,
     ]);
 
-    if (e1 || !entry) return res.status(404).json({ error: 'Leave entry not found' });
-    if (e2) throw e2;
-    if (e3) throw e3;
-
+    const entry = entryRows[0];
+    if (!entry) return res.status(404).json({ error: 'Leave entry not found' });
+    const user = userRows[0];
     const userName = user?.name || user?.email || '';
 
     const links = (recipients || []).map(r => {
@@ -112,25 +106,22 @@ router.post('/links', async (req, res) => {
 // ── GET /api/viber/open/:recipientId?leaveId=xxx ──────────────────────────────
 router.get('/open/:recipientId', async (req, res) => {
   try {
-    const [
-      { data: r,          error: e1 },
-      { data: entry },
-      { data: leaveTypes },
-      { data: user },
-    ] = await Promise.all([
-      supabase.from('recipients').select('*').eq('id', req.params.recipientId).eq('user_id', req.userId).single(),
+    const [recipientRows, entryRows, leaveTypes, userRows] = await Promise.all([
+      sql`SELECT * FROM recipients WHERE id = ${req.params.recipientId} AND user_id = ${req.userId}`,
       req.query.leaveId
-        ? supabase.from('leave_history').select('*')
-            .eq('id', req.query.leaveId).eq('user_id', req.userId).single()
-        : Promise.resolve({ data: null }),
-      supabase.from('leave_types').select('*').order('order', { ascending: true }),
-      req.userId
-        ? supabase.from('users').select('name, email').eq('id', req.userId).single()
-        : Promise.resolve({ data: null }),
+        ? sql`SELECT id, user_id, leave_type_id, type_name, type_color,
+                     start_date::text AS start_date, end_date::text AS end_date, days, reason, applied_at
+              FROM leave_history WHERE id = ${req.query.leaveId} AND user_id = ${req.userId}`
+        : Promise.resolve([]),
+      sql`SELECT * FROM leave_types WHERE user_id = ${req.userId} ORDER BY "order" ASC`,
+      sql`SELECT name, email FROM users WHERE id = ${req.userId}`,
     ]);
 
-    if (e1 || !r) return res.status(404).json({ error: 'Recipient not found' });
+    const r = recipientRows[0];
+    if (!r) return res.status(404).json({ error: 'Recipient not found' });
 
+    const entry = entryRows[0];
+    const user  = userRows[0];
     const userName = user?.name || user?.email || '';
     const msg = entry
       ? buildMessage(entry, userName, leaveTypes || [], r.name)

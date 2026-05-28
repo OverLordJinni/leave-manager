@@ -1,6 +1,8 @@
 # 📅 Leave Manager — Full Stack App
 
-A personal leave balance manager with Viber notifications, auto-reset on contract renewal, and a mobile-first PWA interface.
+A personal leave-balance manager with Viber notifications, auto-reset on contract
+renewal, and a mobile-first PWA. Runs entirely on **Vercel** (static PWA + a
+serverless Express API) backed by **Neon** serverless Postgres.
 
 ---
 
@@ -9,12 +11,14 @@ A personal leave balance manager with Viber notifications, auto-reset on contrac
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React + Vite, PWA (installable on phone) |
-| Backend | Node.js + Express |
-| Database | SQLite (local) → PostgreSQL (production) |
-| ORM | Prisma |
-| Hosting (frontend) | Netlify — **Free** |
-| Hosting (backend+DB) | Railway — **~$5/month** |
+| Backend | Node.js + Express, deployed as a Vercel serverless function (`/api`) |
+| Database | Neon serverless Postgres (Vercel Marketplace, free tier) |
+| Auth | Email + password (bcrypt) with stateless signed-cookie sessions; WebAuthn passkeys |
+| Hosting | **Vercel** — one project, one domain (Hobby free tier) |
 | Notifications | Viber deep-link (free, sends from your account) |
+
+Everything is same-origin: the PWA and the API share one Vercel domain, so session
+cookies are simple `SameSite=Lax` cookies — no cross-origin proxy needed.
 
 ---
 
@@ -22,286 +26,146 @@ A personal leave balance manager with Viber notifications, auto-reset on contrac
 
 ```
 leave-manager/
+├── api/
+│   └── [...path].js          # Vercel serverless function → exports the Express app
 ├── backend/
-│   ├── prisma/schema.prisma
-│   ├── src/
-│   │   ├── index.js
-│   │   ├── db/seed.js
-│   │   ├── middleware/auth.js
-│   │   └── routes/
-│   │       ├── leave.js
-│   │       ├── settings.js
-│   │       ├── recipients.js
-│   │       └── viber.js
-│   ├── .env.example
-│   └── package.json
-└── frontend/
-    ├── src/
-    │   ├── App.jsx
-    │   ├── api.js
-    │   └── main.jsx
-    ├── index.html
-    ├── vite.config.js
-    ├── .env.example
-    └── package.json
+│   └── src/
+│       ├── app.js            # builds & exports the Express app (no listen)
+│       ├── index.js          # local dev entry (app.listen)
+│       ├── db/
+│       │   ├── client.js     # Neon serverless client (`sql` tagged-template)
+│       │   └── schema.sql    # one-time DDL to run against Neon
+│       ├── middleware/auth.js
+│       └── routes/{leave,settings,recipients,viber}.js
+├── frontend/
+│   └── src/{App.jsx, api.js, main.jsx, tokens.css}
+├── vercel.json               # build + routing + security headers
+└── package.json              # serverless-function dependencies (root)
 ```
 
 ---
 
 ## 🚀 Local Development
 
-### 1. Clone & install
-
 ```bash
-git clone https://github.com/YOUR_USERNAME/leave-manager.git
-cd leave-manager
+# 1. Install
+npm install                 # root (serverless function deps)
+cd backend  && npm install  # local API deps
+cd ../frontend && npm install
 
-# Backend
-cd backend
-npm install
-cp .env.example .env          # edit as needed
+# 2. Configure
+cp backend/.env.example  backend/.env     # set DATABASE_URL + COOKIE_SECRET
+cp frontend/.env.example frontend/.env    # leave VITE_API_URL empty
 
-# Frontend
-cd ../frontend
-npm install
-cp .env.example .env          # edit as needed
+# 3. Apply the schema to your Neon database (once)
+psql "$DATABASE_URL" -f backend/src/db/schema.sql
+# (or paste backend/src/db/schema.sql into the Neon SQL editor)
 ```
 
-### 2. Set up the database (SQLite for local dev)
+Run it one of two ways:
 
+**A) Two processes (Vite proxies /api → localhost:3001):**
 ```bash
-cd backend
-
-# Make sure .env has:
-# DATABASE_PROVIDER="sqlite"
-# DATABASE_URL="file:./dev.db"
-
-npx prisma generate
-npx prisma db push            # creates dev.db with all tables
+cd backend  && npm run dev      # → http://localhost:3001
+cd frontend && npm run dev      # → http://localhost:5173
 ```
 
-### 3. Run both servers
-
-**Terminal 1 — Backend:**
+**B) Single origin (recommended — matches production, needed for passkey testing):**
 ```bash
-cd backend
-npm run dev
-# → Running on http://localhost:3001
-```
-
-**Terminal 2 — Frontend:**
-```bash
-cd frontend
-npm run dev
-# → Running on http://localhost:5173
-```
-
-Open http://localhost:5173 in your browser.
-
----
-
-## ☁️ Production Deployment
-
-### Step 1 — Push to GitHub
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/leave-manager.git
-git push -u origin main
+npm i -g vercel
+vercel dev                      # → http://localhost:3000  (serves PWA + /api together)
 ```
 
 ---
 
-### Step 2 — Deploy Backend to Railway
+## ☁️ Deploy to Vercel
 
-Railway gives you Node.js + PostgreSQL for ~$5/month with always-on uptime.
+1. **Push to GitHub** and **Import the repo** at [vercel.com/new](https://vercel.com/new).
+   Vercel reads `vercel.json` — no build settings to fill in.
+2. **Add the database:** Vercel project → **Storage → Create Database → Neon**.
+   This auto-injects `DATABASE_URL` into the project's environment.
+3. **Apply the schema** once: copy `backend/src/db/schema.sql` into the Neon SQL
+   editor (Storage → your Neon DB → Query) and run it.
+4. **Set environment variables** (Project → Settings → Environment Variables):
+   ```
+   COOKIE_SECRET   = <64-char random hex>   # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   FRONTEND_URL    = https://your-domain.com
+   ADMIN_EMAIL     = you@example.com        # optional — locks signup to this email
+   ```
+   `DATABASE_URL` is added automatically by the Neon integration.
+5. **Deploy.** Pushes to `main` auto-deploy; PRs get preview URLs.
 
-1. Go to **railway.app** and sign up (free account)
-2. Click **New Project → Deploy from GitHub repo**
-3. Select your `leave-manager` repo
-4. Set the **Root Directory** to `backend`
-5. Railway will auto-detect Node.js
+### Custom domain
 
-**Add PostgreSQL:**
-6. In your Railway project → **+ New** → **Database** → **Add PostgreSQL**
-7. Click the PostgreSQL service → **Variables** tab → copy `DATABASE_URL`
+Project → **Settings → Domains → Add** your domain, then point DNS as Vercel
+instructs (an `A`/`ALIAS` record, or switch the registrar's nameservers to
+Vercel). Set `FRONTEND_URL` to the final domain and redeploy.
 
-**Set environment variables** (Railway project → Variables tab):
-
-```
-DATABASE_PROVIDER   = postgresql
-DATABASE_URL        = (paste from PostgreSQL service above)
-API_TOKEN           = (generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
-FRONTEND_URL        = https://YOUR-APP.netlify.app
-PORT                = 3001
-```
-
-**Run database migrations:**
-8. Railway project → your backend service → **Deploy** tab → open a shell (or use Railway CLI):
-```bash
-npx prisma generate
-npx prisma db push
-```
-Or add a post-deploy command in Railway settings:
-```
-npx prisma generate && npx prisma db push && node src/index.js
-```
-
-9. Your backend URL will be something like: `https://leave-manager-production.up.railway.app`
+> ⚠️ **Passkeys are bound to the domain.** WebAuthn ties credentials to the
+> relying-party ID (your domain's hostname). Register/test passkeys on the
+> **final custom domain**, not on a `*.vercel.app` preview URL.
 
 ---
 
-### Step 3 — Deploy Frontend to Netlify
+## 📱 Install as a Mobile App (PWA)
 
-Netlify is completely free for static sites.
-
-1. Go to **netlify.com** and sign up
-2. Click **Add new site → Import an existing project**
-3. Connect GitHub → select `leave-manager` repo
-4. Set build settings:
-   - **Base directory:** `frontend`
-   - **Build command:** `npm run build`
-   - **Publish directory:** `frontend/dist`
-5. **Before deploying**, add environment variables (Site settings → Environment variables):
-
-```
-VITE_API_URL     = https://leave-manager-production.up.railway.app
-VITE_API_TOKEN   = (same token you set on Railway)
-```
-
-6. Click **Deploy site**
-7. Your app will be live at: `https://random-name.netlify.app`
-8. (Optional) Add a custom domain in Netlify settings
+- **iPhone (Safari):** open the site → Share → **Add to Home Screen**.
+- **Android (Chrome):** menu → **Add to Home Screen** (or accept the prompt).
 
 ---
 
-### Step 4 — Update CORS on Backend
+## 🔐 Security & Auth
 
-Go back to Railway → your backend service → Variables:
-```
-FRONTEND_URL = https://your-actual-netlify-url.netlify.app
-```
-Redeploy the backend service.
-
----
-
-## 📱 Install as Mobile App (PWA)
-
-Once deployed to Netlify:
-
-**iPhone (Safari):**
-1. Open your Netlify URL in Safari
-2. Tap the Share button → **Add to Home Screen**
-3. App appears on your home screen with an icon
-
-**Android (Chrome):**
-1. Open your Netlify URL in Chrome
-2. Tap the three-dot menu → **Add to Home Screen** (or Chrome will prompt automatically)
-
-The app loads instantly, works offline (cached), and feels like a native app.
-
----
-
-## 🔐 Security
-
-This app uses a **single shared API token** since it's designed for one user:
-- Backend checks `x-api-token` header on every request
-- Frontend sends the token from `VITE_API_TOKEN` env var
-- Keep your token secret — don't commit `.env` files to GitHub
-- Add `.env` to your `.gitignore`
-
-```bash
-echo ".env" >> .gitignore
-echo "backend/.env" >> .gitignore
-echo "frontend/.env" >> .gitignore
-```
-
----
-
-## 📲 Viber Integration
-
-The app uses **Viber deep-links** — the free, personal approach:
-
-- When you submit a leave request, the backend generates a `viber://chat?number=PHONE&draft=MESSAGE` URL
-- Tapping the link on your phone opens Viber with the message pre-filled
-- You tap **Send** once per recipient
-- The message comes from **your personal Viber account** — more personal than a bot
-
-**Why not a Viber Bot?**
-As of February 2024, Viber requires a commercial contract + €100/month maintenance fee for new bots. For a personal single-user app, the deep-link approach is free, instant, and works perfectly.
-
----
-
-## 💰 Monthly Cost Summary
-
-| Service | Plan | Cost |
-|---------|------|------|
-| Netlify | Free | $0 |
-| Railway | Hobby (always-on) | ~$5 |
-| **Total** | | **~$5/month** |
-
-**Completely free alternative:**
-- Frontend: Netlify (free) → $0
-- Backend: Render (free tier — 50s cold start on first request) → $0
-- Database: Render PostgreSQL free (90-day expiry, need to back up) → $0
-- **Total: $0** (with cold-start trade-off)
+- **Single-user by default:** the first account to sign up wins; further signups
+  are blocked. Set `ADMIN_EMAIL` to restrict signup to one specific address.
+- **Sessions** are stateless, HMAC-signed cookies (`COOKIE_SECRET`) — no server
+  store, so they work on serverless. 30-day sliding expiry; logout clears the cookie.
+- **Passkeys** use real server-side WebAuthn verification (`@simplewebauthn/server`):
+  signature, challenge, origin, RP ID, and counter are all checked.
+- Every database query is scoped by `user_id` in application code.
 
 ---
 
 ## 🛠️ API Reference
 
-All endpoints require `x-api-token` header.
+All `/api/*` routes (except auth) require a valid session cookie.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check (no auth) |
-| GET | `/api/leave/types` | Get leave types + check reset |
-| POST | `/api/leave/types` | Add leave type |
-| PUT | `/api/leave/types/:id` | Update leave type |
-| DELETE | `/api/leave/types/:id` | Delete leave type |
-| GET | `/api/leave/history` | Get leave history |
-| POST | `/api/leave/apply` | Apply for leave |
-| DELETE | `/api/leave/history/:id` | Cancel leave (restores balance) |
-| GET | `/api/settings` | Get all settings |
-| PUT | `/api/settings` | Update settings |
-| GET | `/api/recipients` | Get Viber recipients |
-| POST | `/api/recipients` | Add recipient |
-| DELETE | `/api/recipients/:id` | Remove recipient |
-| POST | `/api/viber/links` | Get Viber deep-links for a leave entry |
+| GET | `/api/health` | Health check (no auth) |
+| POST | `/api/auth/signup` · `/login` · `/logout` | Email + password auth |
+| GET | `/api/auth/me` | Session check |
+| POST | `/api/auth/forgot-password` | Create reset token (email sending is a TODO) |
+| GET/POST | `/api/auth/passkey/*` | WebAuthn register/login challenge + verify |
+| GET/POST/PUT/DELETE | `/api/leave/types[/:id]` | Leave types (auto-checks reset on GET) |
+| GET/POST/DELETE | `/api/leave/history[/:id]` | Apply / list / cancel leave |
+| GET/PUT | `/api/settings` | App settings |
+| GET/POST/DELETE | `/api/recipients[/:id]` | Viber recipients |
+| POST | `/api/viber/links` | Viber deep-links for a leave entry |
 
 ---
 
-## 🔄 Auto-Reset Logic
+## 🔄 Auto-Reset on Contract Renewal
 
-The contract renewal reset runs **server-side** on every `GET /api/leave/types` call:
+On every `GET /api/leave/types`, if `contractRenewal ≤ today` and it hasn't been
+applied yet: all `used` values reset to 0, `contractRenewal` advances one year,
+and `lastResetDate` is recorded. No cron jobs needed.
 
-1. Checks if `contractRenewal` date ≤ today
-2. If yes: resets all `used` values to 0 in a database transaction
-3. Advances `contractRenewal` by exactly 1 year
-4. Records `lastResetDate`
-5. Returns `resetOccurred: true` so the frontend shows the celebration banner
+---
 
-This means the reset happens automatically the first time you open the app after renewal — no cron jobs or scheduled tasks needed.
+## 📲 Viber Integration
+
+The app builds `viber://chat?number=PHONE&draft=MESSAGE` deep-links. Tapping one
+on a phone opens Viber with the message pre-filled; you tap Send. The message
+comes from your personal Viber account (no paid bot needed).
 
 ---
 
 ## 🐛 Troubleshooting
 
-**"Cannot connect to backend"**
-- Make sure `VITE_API_URL` points to your Railway URL (no trailing slash)
-- Check Railway logs for errors
-- Verify `API_TOKEN` matches in both Railway and Netlify env vars
-
-**Viber link doesn't open Viber**
-- Must be tapped on a mobile device with Viber installed
-- Phone numbers must include country code (e.g. `+66812345678`)
-
-**Database errors on Railway**
-- Run `npx prisma db push` via Railway shell
-- Check `DATABASE_URL` is set correctly
-
-**PWA not installing**
-- Must be served over HTTPS (Netlify handles this automatically)
-- Try clearing browser cache and reloading
+- **DB errors:** confirm `DATABASE_URL` is set and `schema.sql` has been applied
+  to that exact database (use the **pooled** Neon connection string).
+- **Passkey won't register/login:** make sure you're on the real custom domain
+  (not a preview), over HTTPS, and that `FRONTEND_URL` matches the domain exactly.
+- **Viber link doesn't open:** must be tapped on a device with Viber installed;
+  phone numbers need a country code (E.164, e.g. `+9607712345`).

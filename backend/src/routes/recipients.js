@@ -1,6 +1,6 @@
 // src/routes/recipients.js
 const router = require('express').Router();
-const { supabase } = require('../db/supabase');
+const { sql } = require('../db/client');
 
 const PHONE_RE = /^\+[1-9]\d{6,14}$/;
 const clean    = (s, n) => typeof s === 'string' ? s.trim().slice(0, n) : '';
@@ -12,16 +12,14 @@ function dbErr(res, req, err) {
 
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('recipients')
-      .select('*').eq('user_id', req.userId)
-      .order('created_at', { ascending: true });
-    if (error) throw error;
+    const data = await sql`
+      SELECT * FROM recipients WHERE user_id = ${req.userId} ORDER BY created_at ASC`;
     res.json(data);
   } catch (err) { dbErr(res, req, err); }
 });
 
 router.post('/', async (req, res) => {
-  const name    = clean(req.body.name,  80);
+  const name     = clean(req.body.name,  80);
   const rawPhone = clean(req.body.phone, 20);
   // Accept human-typed phones with spaces/dashes; store E.164.
   const phone   = rawPhone.replace(/[\s-]/g, '');
@@ -32,19 +30,16 @@ router.post('/', async (req, res) => {
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
   try {
-    const { data, error } = await supabase.from('recipients')
-      .insert({ user_id: req.userId, name, phone })
-      .select().single();
-    if (error) throw error;
-    res.status(201).json(data);
+    const rows = await sql`
+      INSERT INTO recipients (user_id, name, phone) VALUES (${req.userId}, ${name}, ${phone})
+      RETURNING *`;
+    res.status(201).json(rows[0]);
   } catch (err) { dbErr(res, req, err); }
 });
 
 router.delete('/:id', async (req, res) => {
   try {
-    const { error } = await supabase.from('recipients')
-      .delete().eq('id', req.params.id).eq('user_id', req.userId);
-    if (error) throw error;
+    await sql`DELETE FROM recipients WHERE id = ${req.params.id} AND user_id = ${req.userId}`;
     res.json({ ok: true });
   } catch (err) { dbErr(res, req, err); }
 });

@@ -1,6 +1,6 @@
 // src/routes/settings.js
 const router = require('express').Router();
-const { supabase } = require('../db/supabase');
+const { sql } = require('../db/client');
 
 const ALLOWED_KEYS = new Set(['contractRenewal', 'lastResetDate', 'onboarded']);
 const ISO_DATE_RE  = /^\d{4}-\d{2}-\d{2}$/;
@@ -22,10 +22,8 @@ function dbErr(res, req, err) {
 
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('settings')
-      .select('key, value').eq('user_id', req.userId);
-    if (error) throw error;
-    res.json(Object.fromEntries((data||[]).map(r => [r.key, r.value])));
+    const data = await sql`SELECT key, value FROM settings WHERE user_id = ${req.userId}`;
+    res.json(Object.fromEntries((data || []).map(r => [r.key, r.value])));
   } catch (err) { dbErr(res, req, err); }
 });
 
@@ -43,16 +41,11 @@ router.put('/', async (req, res) => {
   }
 
   try {
-    await Promise.all(entries.map(([key, value]) =>
-      supabase.from('settings').upsert(
-        { user_id: req.userId, key, value: String(value) },
-        { onConflict: 'user_id,key' }
-      )
-    ));
-    const { data, error } = await supabase.from('settings')
-      .select('key, value').eq('user_id', req.userId);
-    if (error) throw error;
-    res.json(Object.fromEntries((data||[]).map(r => [r.key, r.value])));
+    await Promise.all(entries.map(([key, value]) => sql`
+      INSERT INTO settings (user_id, key, value) VALUES (${req.userId}, ${key}, ${String(value)})
+      ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`));
+    const data = await sql`SELECT key, value FROM settings WHERE user_id = ${req.userId}`;
+    res.json(Object.fromEntries((data || []).map(r => [r.key, r.value])));
   } catch (err) { dbErr(res, req, err); }
 });
 

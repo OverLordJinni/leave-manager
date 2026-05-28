@@ -1,44 +1,100 @@
 // src/middleware/auth.js
-// Email + password auth backed by Supabase users table.
-// Passkey credentials persisted to passkey_credentials table.
-const crypto   = require('crypto');
-const bcrypt   = require('bcryptjs');
-const { supabase } = require('../db/supabase');
+// Email + password auth over the Neon `users` table.
+// Sessions are STATELESS, signed cookies (HMAC-SHA256) — no server-side store,
+// which is what makes this work on serverless. Passkeys use real WebAuthn
+// verification via @simplewebauthn/server, with the challenge held in a short
+// signed cookie (no in-memory pending-challenge map).
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const { sql } = require('../db/client');
 
-const SESSION_TTL  = 30 * 24 * 60 * 60 * 1000; // 30 days
-const COOKIE_NAME  = 'lm_session';
-const isProd       = process.env.NODE_ENV === 'production';
+const isProd      = process.env.NODE_ENV === 'production';
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+const CHAL_TTL    = 5 * 60 * 1000;            // 5 minutes
+const COOKIE_NAME = 'lm_session';
+const CHAL_COOKIE = 'lm_wa_chal';
 
 // Dummy hash for constant-time rejection (prevents user enumeration via timing)
 const DUMMY_HASH = '$2a$12$' + 'x'.repeat(53);
 
-// ── Session store (in-memory, per process) ────────────────────────────────────
-const sessions          = new Map(); // token → { expires, userId }
-const pendingChallenges = new Map(); // challengeId → { challenge, expires }
+const SECRET = process.env.COOKIE_SECRET;
+if (isProd && !SECRET) { console.error('FATAL: COOKIE_SECRET must be set in production'); process.exit(1); }
+const SIGNING_KEY = SECRET || 'dev-only-insecure-secret-do-not-use-in-prod';
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of sessions)          { if (now > v.expires) sessions.delete(k); }
-  for (const [k, v] of pendingChallenges) { if (now > v.expires) pendingChallenges.delete(k); }
-}, 60 * 60 * 1000);
+// @simplewebauthn/server is loaded lazily so this works whether it resolves as
+// CommonJS or ESM-only.
+let _wa;
+const wa = () => (_wa ||= import('@simplewebauthn/server'));
 
-// ── Cookie options ────────────────────────────────────────────────────────────
-const COOKIE_OPTS = {
-  httpOnly: true,
-  secure:   isProd,
-  sameSite: isProd ? 'none' : 'lax',
-  maxAge:   SESSION_TTL,
-  path:     '/',
-};
-
-function createSession(res, userId) {
-  const tok = crypto.randomBytes(32).toString('hex');
-  sessions.set(tok, { expires: Date.now() + SESSION_TTL, userId });
-  res.cookie(COOKIE_NAME, tok, COOKIE_OPTS);
-  return tok;
+// ── Signed-token helpers ───────────────────────────────────────────────────────
+function sign(obj) {
+  const payload = Buffer.from(JSON.stringify(obj)).toString('base64url');
+  const mac = crypto.createHmac('sha256', SIGNING_KEY).update(payload).digest('base64url');
+  return `${payload}.${mac}`;
+}
+function unsign(token) {
+  if (!token || typeof token !== 'string') return null;
+  const i = token.lastIndexOf('.');
+  if (i < 1) return null;
+  const payload = token.slice(0, i), mac = token.slice(i + 1);
+  const expected = crypto.createHmac('sha256', SIGNING_KEY).update(payload).digest('base64url');
+  const a = Buffer.from(mac), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const obj = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!obj || typeof obj.exp !== 'number' || Date.now() > obj.exp) return null;
+    return obj;
+  } catch { return null; }
 }
 
-// ── Signup ────────────────────────────────────────────────────────────────────
+// ── Cookies ────────────────────────────────────────────────────────────────────
+const baseCookie = { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/' };
+
+function createSession(res, userId) {
+  res.cookie(COOKIE_NAME, sign({ typ: 'sess', userId, exp: Date.now() + SESSION_TTL }),
+    { ...baseCookie, maxAge: SESSION_TTL });
+}
+function readSession(req) {
+  const o = unsign(req.cookies?.[COOKIE_NAME]);
+  return o && o.typ === 'sess' ? o : null;
+}
+function setChallenge(res, data) {
+  res.cookie(CHAL_COOKIE, sign({ typ: 'chal', ...data, exp: Date.now() + CHAL_TTL }),
+    { ...baseCookie, maxAge: CHAL_TTL });
+}
+function readChallenge(req) {
+  const o = unsign(req.cookies?.[CHAL_COOKIE]);
+  return o && o.typ === 'chal' ? o : null;
+}
+function clearChallenge(res) {
+  res.clearCookie(CHAL_COOKIE, { path: '/', sameSite: 'lax', secure: isProd });
+}
+
+// ── WebAuthn relying-party config ──────────────────────────────────────────────
+function getRpId() {
+  try { return new URL(process.env.FRONTEND_URL).hostname; } catch { return 'localhost'; }
+}
+function expectedOrigins() {
+  const list = [];
+  if (process.env.FRONTEND_URL) list.push(process.env.FRONTEND_URL);
+  if (!isProd) list.push('http://localhost:5173', 'http://localhost:3000');
+  return list.length ? list : ['http://localhost:3000'];
+}
+
+// ── Per-user default data (runs once, at signup) ───────────────────────────────
+async function seedUserDefaults(userId) {
+  await sql`
+    INSERT INTO leave_types (user_id, name, total, used, color, "order") VALUES
+      (${userId}, 'Annual Leave', 21, 0, '#2563eb', 0),
+      (${userId}, 'Sick Leave',   14, 0, '#16a34a', 1)`;
+  await Promise.all([
+    sql`INSERT INTO settings (user_id, key, value) VALUES (${userId}, 'contractRenewal', '') ON CONFLICT (user_id, key) DO NOTHING`,
+    sql`INSERT INTO settings (user_id, key, value) VALUES (${userId}, 'lastResetDate',   '') ON CONFLICT (user_id, key) DO NOTHING`,
+    sql`INSERT INTO settings (user_id, key, value) VALUES (${userId}, 'onboarded',  'false') ON CONFLICT (user_id, key) DO NOTHING`,
+  ]);
+}
+
+// ── Signup ─────────────────────────────────────────────────────────────────────
 async function handleSignup(req, res) {
   const { email, password, name } = req.body || {};
   if (!email || !password)
@@ -50,41 +106,40 @@ async function handleSignup(req, res) {
   if (password.length < 8)
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
-  // If ADMIN_EMAIL is set, restrict signup to that address only
-  const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
-  if (adminEmail && emailClean !== adminEmail)
-    return res.status(403).json({ error: 'Signup is restricted to the configured admin email' });
+  try {
+    const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+    if (adminEmail && emailClean !== adminEmail)
+      return res.status(403).json({ error: 'Signup is restricted to the configured admin email' });
 
-  // If no ADMIN_EMAIL, enforce single-user: only one account can exist
-  if (!adminEmail) {
-    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    if (count > 0)
-      return res.status(403).json({ error: 'An account already exists. This is a single-user app.' });
-  }
+    // No ADMIN_EMAIL → single-user app: only one account may exist.
+    if (!adminEmail) {
+      const cnt = await sql`SELECT count(*)::int AS count FROM users`;
+      if ((cnt[0]?.count || 0) > 0)
+        return res.status(403).json({ error: 'An account already exists. This is a single-user app.' });
+    }
 
-  // Prevent duplicate accounts
-  const { data: existing } = await supabase
-    .from('users').select('id').eq('email', emailClean).maybeSingle();
-  if (existing)
-    return res.status(409).json({ error: 'An account with this email already exists' });
+    const dup = await sql`SELECT id FROM users WHERE email = ${emailClean}`;
+    if (dup[0]) return res.status(409).json({ error: 'An account with this email already exists' });
 
-  const hash = await bcrypt.hash(password, 12);
-  const { data: user, error } = await supabase
-    .from('users')
-    .insert({ email: emailClean, password_hash: hash, name: (name || '').trim().slice(0, 100) || null })
-    .select('id').single();
+    const hash = await bcrypt.hash(password, 12);
+    const rows = await sql`
+      INSERT INTO users (email, password_hash, name)
+      VALUES (${emailClean}, ${hash}, ${(name || '').trim().slice(0, 100) || null})
+      RETURNING id`;
+    const userId = rows[0].id;
 
-  if (error) {
-    console.error(JSON.stringify({ event: 'signup_error', error: error.message }));
+    await seedUserDefaults(userId);
+
+    console.log(JSON.stringify({ event: 'signup', userId }));
+    createSession(res, userId);
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'signup_error', error: err.message }));
     return res.status(500).json({ error: 'Internal server error' });
   }
-
-  console.log(JSON.stringify({ event: 'signup', userId: user.id }));
-  createSession(res, user.id);
-  return res.status(201).json({ ok: true });
 }
 
-// ── Login ─────────────────────────────────────────────────────────────────────
+// ── Login ──────────────────────────────────────────────────────────────────────
 async function handleLogin(req, res) {
   try {
     const { email, password } = req.body || {};
@@ -92,14 +147,8 @@ async function handleLogin(req, res) {
       return res.status(400).json({ error: 'Email and password are required' });
 
     const emailClean = email.toLowerCase().trim();
-
-    const { data: user, error: dbErr } = await supabase
-      .from('users').select('id, password_hash').eq('email', emailClean).maybeSingle();
-
-    if (dbErr) {
-      console.error(JSON.stringify({ event: 'login_db_error', error: dbErr.message }));
-      return res.status(500).json({ error: 'Internal server error' });
-    }
+    const rows = await sql`SELECT id, password_hash FROM users WHERE email = ${emailClean}`;
+    const user = rows[0];
 
     if (!user) {
       await bcrypt.compare('dummy', DUMMY_HASH); // constant-time padding
@@ -113,36 +162,40 @@ async function handleLogin(req, res) {
     createSession(res, user.id);
     return res.json({ ok: true });
   } catch (err) {
-    console.error(JSON.stringify({ event: 'login_unexpected_error', error: err.message, stack: err.stack }));
+    console.error(JSON.stringify({ event: 'login_error', error: err.message }));
     return res.status(500).json({ error: 'Internal server error' });
   }
 }
 
-// ── Session check ─────────────────────────────────────────────────────────────
+// ── Session check (sliding window) ─────────────────────────────────────────────
 function handleMe(req, res) {
-  const tok  = req.cookies?.[COOKIE_NAME];
-  const sess = tok && sessions.get(tok);
-  if (!sess || Date.now() > sess.expires) return res.status(401).json({ error: 'Unauthorized' });
-  sess.expires = Date.now() + SESSION_TTL; // sliding window
+  const sess = readSession(req);
+  if (!sess) return res.status(401).json({ error: 'Unauthorized' });
+  createSession(res, sess.userId); // refresh expiry
   return res.json({ ok: true });
 }
 
-// ── Forgot password ───────────────────────────────────────────────────────────
+// ── Logout ───────────────────────────────────────────────────────────────────
+function handleLogout(req, res) {
+  res.clearCookie(COOKIE_NAME, { path: '/', sameSite: 'lax', secure: isProd });
+  return res.json({ ok: true });
+}
+
+// ── Forgot password ────────────────────────────────────────────────────────────
 async function handleForgotPassword(req, res) {
-  // Always return 200 to prevent email enumeration
+  // Always return 200 to prevent email enumeration.
   try {
     const { email } = req.body || {};
     if (email) {
-      const { data: user } = await supabase
-        .from('users').select('id').eq('email', email.toLowerCase().trim()).maybeSingle();
-      if (user) {
+      const rows = await sql`SELECT id FROM users WHERE email = ${email.toLowerCase().trim()}`;
+      if (rows[0]) {
         const token   = crypto.randomBytes(32).toString('hex');
         const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-        await supabase.from('password_reset_tokens')
-          .insert({ user_id: user.id, token, expires_at: expires });
-        console.log(JSON.stringify({ event: 'password_reset_token_created', userId: user.id }));
-        // TODO: Send email with reset link using your email provider (SendGrid, Resend, etc.)
-        // Reset URL: `${process.env.FRONTEND_URL}/reset-password?token=${token}`
+        await sql`
+          INSERT INTO password_reset_tokens (user_id, token, expires_at)
+          VALUES (${rows[0].id}, ${token}, ${expires})`;
+        console.log(JSON.stringify({ event: 'password_reset_token_created', userId: rows[0].id }));
+        // TODO: email the reset link: `${process.env.FRONTEND_URL}/reset-password?token=${token}`
       }
     }
   } catch (err) {
@@ -151,123 +204,162 @@ async function handleForgotPassword(req, res) {
   return res.json({ ok: true });
 }
 
-// ── Passkey: challenge ────────────────────────────────────────────────────────
-function handlePasskeyChallenge(req, res) {
-  const challenge   = crypto.randomBytes(32).toString('base64url');
-  const challengeId = crypto.randomBytes(16).toString('hex');
-  pendingChallenges.set(challengeId, { challenge, expires: Date.now() + 5 * 60 * 1000 });
+// ── Passkey: registration challenge (must be logged in) ────────────────────────
+async function handlePasskeyRegisterChallenge(req, res) {
+  const sess = readSession(req);
+  if (!sess) return res.status(401).json({ error: 'Must be logged in to register a passkey' });
+  try {
+    const rows = await sql`SELECT id, email, name FROM users WHERE id = ${sess.userId}`;
+    const user = rows[0];
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-  let rpId = 'localhost';
-  try { rpId = new URL(process.env.FRONTEND_URL || 'https://localhost').hostname; } catch {}
-
-  // If the user is logged in, return their userId so the frontend can use it in
-  // the WebAuthn user.id field during registration.
-  const tok    = req.cookies?.[COOKIE_NAME];
-  const sess   = tok && sessions.get(tok);
-  const userId = (sess && Date.now() <= sess.expires) ? sess.userId : null;
-
-  return res.json({ challenge, challengeId, rpId, rpName: 'Leave Manager', userId });
+    const { generateRegistrationOptions } = await wa();
+    const options = await generateRegistrationOptions({
+      rpName: 'Leave Manager',
+      rpID: getRpId(),
+      userID: new TextEncoder().encode(user.id),
+      userName: user.email,
+      userDisplayName: user.name || user.email,
+      attestationType: 'none',
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',
+        residentKey: 'required',
+        userVerification: 'required',
+      },
+    });
+    setChallenge(res, { challenge: options.challenge, userId: user.id });
+    return res.json(options);
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'passkey_register_challenge_error', error: err.message }));
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 }
 
-// ── Passkey: register (must be authenticated) ─────────────────────────────────
+// ── Passkey: verify registration ───────────────────────────────────────────────
 async function handlePasskeyRegister(req, res) {
-  const tok  = req.cookies?.[COOKIE_NAME];
-  const sess = tok && sessions.get(tok);
-  if (!sess || Date.now() > sess.expires)
-    return res.status(401).json({ error: 'Must be logged in to register a passkey' });
+  const sess = readSession(req);
+  if (!sess) return res.status(401).json({ error: 'Must be logged in to register a passkey' });
 
-  const { credentialId, publicKey, challengeId } = req.body || {};
-  if (!credentialId || !publicKey || !challengeId)
-    return res.status(400).json({ error: 'credentialId, publicKey, and challengeId are required' });
-
-  const pending = pendingChallenges.get(challengeId);
-  if (!pending || Date.now() > pending.expires)
+  const chal = readChallenge(req);
+  if (!chal || chal.userId !== sess.userId)
     return res.status(400).json({ error: 'Challenge expired — request a new one' });
-  pendingChallenges.delete(challengeId);
 
-  // One passkey per user — replace any existing, then insert.
-  // Done as delete+insert (rather than upsert with onConflict) because the
-  // unique constraint on passkey_credentials isn't consistent across schemas.
-  const { error: delErr } = await supabase
-    .from('passkey_credentials').delete().eq('user_id', sess.userId);
-  if (delErr) {
-    console.error(JSON.stringify({ event: 'passkey_register_error', stage: 'delete', error: delErr.message }));
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-  const { error } = await supabase
-    .from('passkey_credentials')
-    .insert({ user_id: sess.userId, credential_id: credentialId, public_key: publicKey });
-  if (error) {
-    console.error(JSON.stringify({ event: 'passkey_register_error', stage: 'insert', error: error.message }));
-    return res.status(500).json({ error: 'Internal server error' });
-  }
+  try {
+    const { verifyRegistrationResponse } = await wa();
+    const verification = await verifyRegistrationResponse({
+      response: req.body,
+      expectedChallenge: chal.challenge,
+      expectedOrigin: expectedOrigins(),
+      expectedRPID: getRpId(),
+      requireUserVerification: true,
+    });
+    clearChallenge(res);
 
-  console.log(JSON.stringify({ event: 'passkey_registered', userId: sess.userId }));
-  return res.json({ ok: true });
+    if (!verification.verified || !verification.registrationInfo)
+      return res.status(400).json({ error: 'Passkey verification failed' });
+
+    const { credential } = verification.registrationInfo;
+    const pubKey = Buffer.from(credential.publicKey).toString('base64url');
+
+    // One passkey per user — replace any existing.
+    await sql`DELETE FROM passkey_credentials WHERE user_id = ${sess.userId}`;
+    await sql`
+      INSERT INTO passkey_credentials (user_id, credential_id, public_key, counter)
+      VALUES (${sess.userId}, ${credential.id}, ${pubKey}, ${credential.counter || 0})`;
+
+    console.log(JSON.stringify({ event: 'passkey_registered', userId: sess.userId }));
+    return res.json({ ok: true });
+  } catch (err) {
+    clearChallenge(res);
+    console.error(JSON.stringify({ event: 'passkey_register_error', error: err.message }));
+    return res.status(400).json({ error: 'Passkey registration failed' });
+  }
 }
 
-// ── Passkey: login ────────────────────────────────────────────────────────────
+// ── Passkey: authentication challenge (no session) ─────────────────────────────
+async function handlePasskeyLoginChallenge(req, res) {
+  try {
+    const { generateAuthenticationOptions } = await wa();
+    const options = await generateAuthenticationOptions({
+      rpID: getRpId(),
+      userVerification: 'required',
+      // No allowCredentials → discoverable-credential (usernameless) flow.
+    });
+    setChallenge(res, { challenge: options.challenge });
+    return res.json(options);
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'passkey_login_challenge_error', error: err.message }));
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// ── Passkey: verify authentication ─────────────────────────────────────────────
 async function handlePasskeyLogin(req, res) {
-  const { credentialId, challengeId, verified } = req.body || {};
-  if (!credentialId || !challengeId)
-    return res.status(400).json({ error: 'credentialId and challengeId are required' });
+  const chal = readChallenge(req);
+  if (!chal) return res.status(400).json({ error: 'Challenge expired — request a new one' });
 
-  const pending = pendingChallenges.get(challengeId);
-  if (!pending || Date.now() > pending.expires)
-    return res.status(400).json({ error: 'Challenge expired — request a new one' });
+  const credentialId = req.body?.id;
+  if (!credentialId || typeof credentialId !== 'string')
+    return res.status(400).json({ error: 'Invalid passkey response' });
 
-  if (verified !== true)
-    return res.status(401).json({ error: 'Passkey verification failed' });
+  try {
+    const rows = await sql`
+      SELECT user_id, credential_id, public_key, counter
+      FROM passkey_credentials WHERE credential_id = ${credentialId}`;
+    const cred = rows[0];
+    if (!cred) return res.status(401).json({ error: 'Passkey not recognised' });
 
-  const { data: cred } = await supabase
-    .from('passkey_credentials')
-    .select('user_id')
-    .eq('credential_id', credentialId)
-    .maybeSingle();
+    const { verifyAuthenticationResponse } = await wa();
+    const verification = await verifyAuthenticationResponse({
+      response: req.body,
+      expectedChallenge: chal.challenge,
+      expectedOrigin: expectedOrigins(),
+      expectedRPID: getRpId(),
+      requireUserVerification: true,
+      credential: {
+        id: cred.credential_id,
+        publicKey: new Uint8Array(Buffer.from(cred.public_key, 'base64url')),
+        counter: Number(cred.counter),
+      },
+    });
+    clearChallenge(res);
 
-  if (!cred) return res.status(401).json({ error: 'Passkey not recognised' });
+    if (!verification.verified) return res.status(401).json({ error: 'Passkey verification failed' });
 
-  pendingChallenges.delete(challengeId);
-  console.log(JSON.stringify({ event: 'passkey_login', userId: cred.user_id }));
-  createSession(res, cred.user_id);
-  return res.json({ ok: true });
+    await sql`
+      UPDATE passkey_credentials SET counter = ${verification.authenticationInfo.newCounter}
+      WHERE credential_id = ${credentialId}`;
+
+    console.log(JSON.stringify({ event: 'passkey_login', userId: cred.user_id }));
+    createSession(res, cred.user_id);
+    return res.json({ ok: true });
+  } catch (err) {
+    clearChallenge(res);
+    console.error(JSON.stringify({ event: 'passkey_login_error', error: err.message }));
+    return res.status(401).json({ error: 'Passkey sign-in failed' });
+  }
 }
 
-// ── Passkey: status ───────────────────────────────────────────────────────────
+// ── Passkey: status ─────────────────────────────────────────────────────────────
 async function handlePasskeyStatus(req, res) {
-  const tok  = req.cookies?.[COOKIE_NAME];
-  const sess = tok && sessions.get(tok);
-  if (!sess || Date.now() > sess.expires) return res.json({ registered: false });
-
-  const { data } = await supabase
-    .from('passkey_credentials')
-    .select('id')
-    .eq('user_id', sess.userId)
-    .maybeSingle();
-  return res.json({ registered: !!data });
+  const sess = readSession(req);
+  if (!sess) return res.json({ registered: false });
+  const rows = await sql`SELECT id FROM passkey_credentials WHERE user_id = ${sess.userId}`;
+  return res.json({ registered: rows.length > 0 });
 }
 
-// ── Logout ────────────────────────────────────────────────────────────────────
-function handleLogout(req, res) {
-  const tok = req.cookies?.[COOKIE_NAME];
-  if (tok) sessions.delete(tok);
-  res.clearCookie(COOKIE_NAME, { path: '/', sameSite: isProd ? 'none' : 'lax', secure: isProd });
-  return res.json({ ok: true });
-}
-
-// ── Auth middleware ───────────────────────────────────────────────────────────
+// ── Auth middleware (session required, sliding window) ──────────────────────────
 function auth(req, res, next) {
-  const tok  = req.cookies?.[COOKIE_NAME];
-  const sess = tok && sessions.get(tok);
-  if (!sess || Date.now() > sess.expires)
-    return res.status(401).json({ error: 'Unauthorized' });
-  sess.expires = Date.now() + SESSION_TTL; // sliding window
+  const sess = readSession(req);
+  if (!sess) return res.status(401).json({ error: 'Unauthorized' });
   req.userId = sess.userId;
+  createSession(res, sess.userId); // refresh expiry
   next();
 }
 
 module.exports = {
-  auth, handleLogin, handleLogout, handleSignup, handleMe, handleForgotPassword,
-  COOKIE_OPTS, COOKIE_NAME,
-  handlePasskeyChallenge, handlePasskeyRegister, handlePasskeyLogin, handlePasskeyStatus,
+  auth,
+  handleLogin, handleLogout, handleSignup, handleMe, handleForgotPassword,
+  handlePasskeyRegisterChallenge, handlePasskeyRegister,
+  handlePasskeyLoginChallenge, handlePasskeyLogin, handlePasskeyStatus,
 };

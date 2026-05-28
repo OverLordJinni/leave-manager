@@ -1,6 +1,6 @@
 // src/routes/leave.js
 const router = require('express').Router();
-const { supabase } = require('../db/supabase');
+const { sql } = require('../db/client');
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 const ISO_DATE_RE  = /^\d{4}-\d{2}-\d{2}$/;
@@ -35,14 +35,11 @@ function encodeReason(reason, urgentTask) {
 
 // ── Contract renewal reset ────────────────────────────────────────────────────
 async function checkAndApplyReset(userId) {
-  // Read both contractRenewal and lastResetDate for THIS user
-  const { data: rows } = await supabase
-    .from('settings')
-    .select('key, value')
-    .eq('user_id', userId)
-    .in('key', ['contractRenewal', 'lastResetDate']);
+  const rows = await sql`
+    SELECT key, value FROM settings
+    WHERE user_id = ${userId} AND key IN ('contractRenewal', 'lastResetDate')`;
 
-  const byKey      = Object.fromEntries((rows || []).map(r => [r.key, r.value]));
+  const byKey       = Object.fromEntries((rows || []).map(r => [r.key, r.value]));
   const renewalDate = byKey.contractRenewal;
   const lastReset   = byKey.lastResetDate;
   if (!renewalDate || !isDate(renewalDate)) return { reset: false };
@@ -55,17 +52,13 @@ async function checkAndApplyReset(userId) {
   if (lastReset === renewalDate) return { reset: false };
 
   const next = addOneYear(renewalDate);
-  await supabase.from('settings').upsert(
-    { user_id: userId, key: 'lastResetDate', value: renewalDate },
-    { onConflict: 'user_id,key' }
-  );
-  await Promise.all([
-    supabase.from('leave_types').update({ used: 0 }).eq('user_id', userId),
-    supabase.from('settings').upsert(
-      { user_id: userId, key: 'contractRenewal', value: next },
-      { onConflict: 'user_id,key' }
-    ),
-  ]);
+  await sql`
+    INSERT INTO settings (user_id, key, value) VALUES (${userId}, 'lastResetDate', ${renewalDate})
+    ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`;
+  await sql`UPDATE leave_types SET used = 0 WHERE user_id = ${userId}`;
+  await sql`
+    INSERT INTO settings (user_id, key, value) VALUES (${userId}, 'contractRenewal', ${next})
+    ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`;
   console.log(JSON.stringify({ event: 'leave_reset', userId, next }));
   return { reset: true };
 }
@@ -74,11 +67,8 @@ async function checkAndApplyReset(userId) {
 router.get('/types', async (req, res) => {
   try {
     const resetInfo = await checkAndApplyReset(req.userId);
-    const { data, error } = await supabase
-      .from('leave_types').select('*')
-      .eq('user_id', req.userId)
-      .order('order', { ascending: true });
-    if (error) throw error;
+    const data = await sql`
+      SELECT * FROM leave_types WHERE user_id = ${req.userId} ORDER BY "order" ASC`;
     res.json({ types: data, resetOccurred: resetInfo.reset });
   } catch (err) { dbErr(res, req, err); }
 });
@@ -95,14 +85,13 @@ router.post('/types', async (req, res) => {
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
   try {
-    const { count } = await supabase
-      .from('leave_types').select('*', { count: 'exact', head: true })
-      .eq('user_id', req.userId);
-    const { data, error } = await supabase.from('leave_types')
-      .insert({ user_id: req.userId, name, total, used: 0, color: color||'#2563eb', order: count||0 })
-      .select().single();
-    if (error) throw error;
-    res.status(201).json(data);
+    const cnt = await sql`SELECT count(*)::int AS count FROM leave_types WHERE user_id = ${req.userId}`;
+    const order = cnt[0]?.count || 0;
+    const rows = await sql`
+      INSERT INTO leave_types (user_id, name, total, used, color, "order")
+      VALUES (${req.userId}, ${name}, ${total}, 0, ${color || '#2563eb'}, ${order})
+      RETURNING *`;
+    res.status(201).json(rows[0]);
   } catch (err) { dbErr(res, req, err); }
 });
 
@@ -112,42 +101,43 @@ router.put('/types/:id', async (req, res) => {
   const total = req.body.total !== undefined ? parseInt(req.body.total, 10) : undefined;
   const color = req.body.color !== undefined ? clean(req.body.color,  7)  : undefined;
   const errs  = [];
-  if (name  !== undefined && !name)                         errs.push('name cannot be empty');
+  if (name  !== undefined && !name)                              errs.push('name cannot be empty');
   if (total !== undefined && (isNaN(total)||total<1||total>365)) errs.push('total must be 1–365');
-  if (color !== undefined && !isColor(color))               errs.push('color must be #RRGGBB');
+  if (color !== undefined && !isColor(color))                    errs.push('color must be #RRGGBB');
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
-  const patch = {};
-  if (name  !== undefined) patch.name  = name;
-  if (total !== undefined) patch.total = total;
-  if (color !== undefined) patch.color = color;
-
   try {
-    const { data, error } = await supabase.from('leave_types').update(patch)
-      .eq('id', req.params.id).eq('user_id', req.userId)
-      .select().single();
-    if (error) throw error;
-    res.json(data);
+    // COALESCE keeps the existing value when the field was not provided (null).
+    const rows = await sql`
+      UPDATE leave_types SET
+        name  = COALESCE(${name  ?? null}, name),
+        total = COALESCE(${total ?? null}, total),
+        color = COALESCE(${color ?? null}, color)
+      WHERE id = ${req.params.id} AND user_id = ${req.userId}
+      RETURNING *`;
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
   } catch (err) { dbErr(res, req, err); }
 });
 
 // DELETE /api/leave/types/:id
 router.delete('/types/:id', async (req, res) => {
   try {
-    const { error } = await supabase.from('leave_types')
-      .delete().eq('id', req.params.id).eq('user_id', req.userId);
-    if (error) throw error;
+    await sql`DELETE FROM leave_types WHERE id = ${req.params.id} AND user_id = ${req.userId}`;
     res.json({ ok: true });
   } catch (err) { dbErr(res, req, err); }
 });
 
 // GET /api/leave/history
+// start_date/end_date cast to text so they stay 'YYYY-MM-DD' strings on the wire
+// (the Neon driver would otherwise hand back Date objects → TZ-shifted ISO in JSON).
 router.get('/history', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('leave_history')
-      .select('*').eq('user_id', req.userId)
-      .order('applied_at', { ascending: false });
-    if (error) throw error;
+    const data = await sql`
+      SELECT id, user_id, leave_type_id, type_name, type_color,
+             start_date::text AS start_date, end_date::text AS end_date,
+             days, reason, applied_at
+      FROM leave_history WHERE user_id = ${req.userId} ORDER BY applied_at DESC`;
     res.json(data);
   } catch (err) { dbErr(res, req, err); }
 });
@@ -168,9 +158,10 @@ router.post('/apply', async (req, res) => {
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
   try {
-    const { data: lt, error: ltErr } = await supabase.from('leave_types')
-      .select('*').eq('id', leaveTypeId).eq('user_id', req.userId).single();
-    if (ltErr || !lt) return res.status(404).json({ error: 'Leave type not found' });
+    const lts = await sql`
+      SELECT * FROM leave_types WHERE id = ${leaveTypeId} AND user_id = ${req.userId}`;
+    const lt = lts[0];
+    if (!lt) return res.status(404).json({ error: 'Leave type not found' });
 
     const days = countWeekdays(startDate, endDate);
     if (days <= 0)             return res.status(400).json({ error: 'No working days in range' });
@@ -178,20 +169,19 @@ router.post('/apply', async (req, res) => {
     if (lt.used + days > lt.total)
       return res.status(422).json({ error: 'Insufficient balance', remaining: lt.total - lt.used });
 
-    const { data: entry, error: insErr } = await supabase.from('leave_history')
-      .insert({
-        user_id: req.userId,
-        leave_type_id: leaveTypeId, type_name: lt.name, type_color: lt.color,
-        start_date: startDate, end_date: endDate, days,
-        reason: encodeReason(reason, urgentTask),
-      })
-      .select().single();
-    if (insErr) throw insErr;
+    const inserted = await sql`
+      INSERT INTO leave_history
+        (user_id, leave_type_id, type_name, type_color, start_date, end_date, days, reason)
+      VALUES
+        (${req.userId}, ${leaveTypeId}, ${lt.name}, ${lt.color}, ${startDate}, ${endDate}, ${days}, ${encodeReason(reason, urgentTask)})
+      RETURNING id, leave_type_id, type_name, type_color,
+                start_date::text AS start_date, end_date::text AS end_date,
+                days, reason, applied_at`;
+    const entry = inserted[0];
 
-    const { error: updErr } = await supabase.from('leave_types')
-      .update({ used: lt.used + days })
-      .eq('id', leaveTypeId).eq('user_id', req.userId);
-    if (updErr) throw updErr;
+    await sql`
+      UPDATE leave_types SET used = ${lt.used + days}
+      WHERE id = ${leaveTypeId} AND user_id = ${req.userId}`;
 
     // Map snake_case → camelCase for frontend compatibility
     res.status(201).json({
@@ -211,21 +201,18 @@ router.post('/apply', async (req, res) => {
 // DELETE /api/leave/history/:id
 router.delete('/history/:id', async (req, res) => {
   try {
-    const { data: entry, error: fetchErr } = await supabase.from('leave_history')
-      .select('*').eq('id', req.params.id).eq('user_id', req.userId).single();
-    if (fetchErr || !entry) return res.status(404).json({ error: 'Not found' });
+    const found = await sql`
+      SELECT * FROM leave_history WHERE id = ${req.params.id} AND user_id = ${req.userId}`;
+    const entry = found[0];
+    if (!entry) return res.status(404).json({ error: 'Not found' });
 
-    const { error: delErr } = await supabase.from('leave_history')
-      .delete().eq('id', req.params.id).eq('user_id', req.userId);
-    if (delErr) throw delErr;
+    await sql`DELETE FROM leave_history WHERE id = ${req.params.id} AND user_id = ${req.userId}`;
 
-    // Decrement used count
-    const { data: lt } = await supabase.from('leave_types')
-      .select('used').eq('id', entry.leave_type_id).eq('user_id', req.userId).single();
-    if (lt) {
-      await supabase.from('leave_types')
-        .update({ used: Math.max(0, lt.used - entry.days) })
-        .eq('id', entry.leave_type_id).eq('user_id', req.userId);
+    // Decrement used count on the linked leave type
+    if (entry.leave_type_id) {
+      await sql`
+        UPDATE leave_types SET used = GREATEST(0, used - ${entry.days})
+        WHERE id = ${entry.leave_type_id} AND user_id = ${req.userId}`;
     }
     res.json({ ok: true });
   } catch (err) { dbErr(res, req, err); }

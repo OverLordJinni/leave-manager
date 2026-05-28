@@ -1,4 +1,6 @@
 // src/api.js
+// Same-origin: the API is served from the same Vercel domain as this app, so all
+// paths are relative. (VITE_API_URL is still honoured if set, for split local dev.)
 const BASE = import.meta.env.VITE_API_URL || '';
 
 async function req(method, path, body) {
@@ -36,11 +38,13 @@ export const restoreSession = async () => {
   } catch { return false; }
 };
 
-// Passkey
-export const getPasskeyChallenge = ()  => req('GET',  '/api/auth/passkey/challenge');
-export const registerPasskey     = (d) => req('POST', '/api/auth/passkey/register', d);
-export const loginPasskey        = (d) => req('POST', '/api/auth/passkey/login',    d);
-export const getPasskeyStatus    = ()  => req('GET',  '/api/auth/passkey/status');
+// Passkey (WebAuthn) — challenge endpoints return @simplewebauthn options JSON;
+// register/login take the browser's attestation/assertion response.
+export const getPasskeyRegisterChallenge = () => req('GET',  '/api/auth/passkey/register-challenge');
+export const getPasskeyLoginChallenge    = () => req('GET',  '/api/auth/passkey/login-challenge');
+export const registerPasskey             = (d) => req('POST', '/api/auth/passkey/register', d);
+export const loginPasskey                = (d) => req('POST', '/api/auth/passkey/login',    d);
+export const getPasskeyStatus            = ()  => req('GET',  '/api/auth/passkey/status');
 
 // Leave types
 export const getLeaveTypes   = ()        => req('GET',    '/api/leave/types');
