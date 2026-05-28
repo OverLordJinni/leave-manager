@@ -1,4 +1,4 @@
-# 📅 Leave Manager — Full Stack App
+# 📅 Salam — Leave Manager
 
 A personal leave-balance manager with Viber notifications, auto-reset on contract
 renewal, and a mobile-first PWA. Runs entirely on **Vercel** (static PWA + a

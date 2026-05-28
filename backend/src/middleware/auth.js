@@ -215,7 +215,7 @@ async function handlePasskeyRegisterChallenge(req, res) {
 
     const { generateRegistrationOptions } = await wa();
     const options = await generateRegistrationOptions({
-      rpName: 'Leave Manager',
+      rpName: 'Salam',
       rpID: getRpId(),
       userID: new TextEncoder().encode(user.id),
       userName: user.email,

@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
-        name: 'Leave Manager',
-        short_name: 'Leave',
+        name: 'Salam',
+        short_name: 'Salam',
         description: 'Manage your leave balance and notify via Viber',
         theme_color: '#F8F7F4',
         background_color: '#F8F7F4',

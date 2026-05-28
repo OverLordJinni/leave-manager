@@ -311,7 +311,7 @@ function AuthScreen({ onLogin, dark, onToggleDark }) {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--paper)', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'calc(env(safe-area-inset-top, 0px) + 16px) 20px 0' }}>
-        <span className="lm-eyebrow">Leave Manager</span>
+        <span className="lm-eyebrow">Salam</span>
         <ThemeToggle dark={dark} onToggle={onToggleDark}/>
       </div>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: 420, margin: '0 auto', width: '100%', padding: '24px 24px calc(env(safe-area-inset-bottom, 0px) + 32px)' }}>
