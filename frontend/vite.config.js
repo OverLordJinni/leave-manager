@@ -13,8 +13,8 @@ export default defineConfig({
         name: 'Salam',
         short_name: 'Salam',
         description: 'Manage your leave balance and notify via Viber',
-        theme_color: '#F8F7F4',
-        background_color: '#F8F7F4',
+        theme_color: '#F2F2F7',
+        background_color: '#F2F2F7',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
@@ -38,13 +38,14 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3001',
+        target: process.env.VITE_DEV_API_TARGET || 'http://127.0.0.1:3001',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://127.0.0.1:3001',
+        target: process.env.VITE_DEV_API_TARGET || 'http://127.0.0.1:3001',
         changeOrigin: true,
       },
     },
