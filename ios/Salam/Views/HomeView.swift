@@ -63,7 +63,10 @@ struct HomeView: View {
                             VStack(spacing: 0) {
                                 ForEach(Array(state.history.prefix(3).enumerated()), id: \.element.id) { i, h in
                                     if i > 0 { Divider().padding(.leading, 60) }
-                                    HistoryRowView(entry: h)
+                                    NavigationLink(destination: LeaveDetailView(entry: h)) {
+                                        HistoryRowView(entry: h).padding(.horizontal, 16)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
                             .cardBackground()

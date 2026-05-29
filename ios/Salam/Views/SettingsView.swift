@@ -74,6 +74,7 @@ struct LeaveTypeEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var total = 10
+    @State private var used = 0
     @State private var saving = false
 
     var body: some View {
@@ -81,6 +82,13 @@ struct LeaveTypeEditor: View {
             Form {
                 Section { TextField("Name (e.g. Annual, Sick)", text: $name) }
                 Section { Stepper("Total days per year: \(total)", value: $total, in: 1...365) }
+                if existing != nil {
+                    Section {
+                        Stepper("Days used: \(used)", value: $used, in: 0...400)
+                    } footer: {
+                        Text("Adjust the used count to correct your balance — e.g. when setting up, or after a manual change.")
+                    }
+                }
             }
             .navigationTitle(existing == nil ? "Add leave type" : "Edit leave type")
             .navigationBarTitleDisplayMode(.inline)
@@ -91,9 +99,9 @@ struct LeaveTypeEditor: View {
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
                 }
             }
-            .onAppear { if let e = existing { name = e.name; total = e.total } }
+            .onAppear { if let e = existing { name = e.name; total = e.total; used = e.used } }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 
     private func save() {
@@ -101,7 +109,7 @@ struct LeaveTypeEditor: View {
         let n = name.trimmingCharacters(in: .whitespaces)
         Task {
             do {
-                if let e = existing { try await API.shared.updateLeaveType(id: e.id, name: n, total: total, color: e.color ?? "#FF6A3D") }
+                if let e = existing { try await API.shared.updateLeaveType(id: e.id, name: n, total: total, used: used, color: e.color ?? "#FF6A3D") }
                 else { try await API.shared.addLeaveType(name: n, total: total, color: "#FF6A3D") }
                 await state.refresh(); state.showToast(existing == nil ? "Leave type added." : "Leave type updated."); dismiss()
             } catch { state.showToast(error.localizedDescription, isError: true) }
@@ -160,14 +168,25 @@ struct RecipientEditor: View {
     @State private var name = ""
     @State private var phone = ""
     @State private var saving = false
+    @State private var showPicker = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button { showPicker = true } label: {
+                        Label("Choose from Contacts", systemImage: "person.crop.circle.badge.plus")
+                    }
+                }
                 Section { TextField("Name (e.g. Zaha — manager)", text: $name) }
                 Section {
                     TextField("+960 …", text: $phone).keyboardType(.phonePad)
-                } footer: { Text("Include the country code for the Viber deep-link.") }
+                } footer: { Text("Include the country code (e.g. +960…) for the Viber deep-link.") }
+            }
+            .sheet(isPresented: $showPicker) {
+                ContactPicker(onPick: { n, p in name = n; phone = p; showPicker = false },
+                              onCancel: { showPicker = false })
+                    .ignoresSafeArea()
             }
             .navigationTitle("Add contact").navigationBarTitleDisplayMode(.inline)
             .toolbar {

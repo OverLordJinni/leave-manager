@@ -44,6 +44,12 @@ struct HistoryEntry: Codable, Identifiable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty else { return nil }
         return r
     }
+    var urgentTask: String? {
+        let parts = (reason ?? "").components(separatedBy: "\n__UT__:")
+        guard parts.count > 1 else { return nil }
+        let u = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return u.isEmpty ? nil : u
+    }
 }
 
 struct Recipient: Codable, Identifiable, Hashable {

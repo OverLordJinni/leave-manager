@@ -28,6 +28,7 @@ const uid = () => Math.random().toString(36).slice(2,9);
 const today = () => new Date().toISOString().split('T')[0];
 // Strip the backend's urgent-task marker for display
 const cleanReason = r => (r || '').split('\n__UT__:')[0].trim();
+const urgentTaskOf = r => { const p = (r || '').split('\n__UT__:'); return p.length > 1 ? p[1].trim() : ''; };
 
 async function copyText(s) {
   if (!s) return false;
@@ -608,25 +609,29 @@ function HomeScreen({ leaveTypes, settings, history, onApply, justReset, onDismi
   );
 }
 
-function HistoryRow({ item, onCancel, busy }) {
+function HistoryRow({ item, onCancel, busy, onOpen }) {
   const name = item.typeName || item.type_name;
   const sd = item.startDate || item.start_date;
   const ed = item.endDate || item.end_date;
   const reason = cleanReason(item.reason);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px' }}>
-      <span style={{ width: 36, height: 36, borderRadius: 9, background: 'var(--accent-soft)', color: 'var(--tint)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Icon name="calendar" size={17}/>
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="t-body" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
-          <Pill tone="neutral">{item.days}d</Pill>
-        </div>
-        <div className="t-footnote" style={{ marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {fmtShort(sd)}{sd !== ed ? ` → ${fmtShort(ed)}` : ''}{reason ? ` · ${reason}` : ''}
+      <div onClick={onOpen} className={onOpen ? 'press' : undefined}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0, cursor: onOpen ? 'pointer' : undefined }}>
+        <span style={{ width: 36, height: 36, borderRadius: 9, background: 'var(--accent-soft)', color: 'var(--tint)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon name="calendar" size={17}/>
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="t-body" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+            <Pill tone="neutral">{item.days}d</Pill>
+          </div>
+          <div className="t-footnote" style={{ marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {fmtShort(sd)}{sd !== ed ? ` → ${fmtShort(ed)}` : ''}{reason ? ` · ${reason}` : ''}
+          </div>
         </div>
       </div>
+      {onOpen && <Icon name="chevron-right" size={18} style={{ color: 'var(--label-4)', flexShrink: 0 }}/>}
       {onCancel && (
         <button onClick={() => onCancel(item.id)} disabled={busy} aria-label="Cancel leave" className="press"
           style={{ color: 'var(--danger)', padding: 6, opacity: busy ? 0.4 : 1, display: 'inline-flex', flexShrink: 0 }}>
@@ -634,6 +639,74 @@ function HistoryRow({ item, onCancel, busy }) {
         </button>
       )}
     </div>
+  );
+}
+
+function LeaveDetailSheet({ item, onClose, onCancel, toast }) {
+  const name = item.typeName || item.type_name;
+  const sd = item.startDate || item.start_date;
+  const ed = item.endDate || item.end_date;
+  const reason = cleanReason(item.reason);
+  const urgent = urgentTaskOf(item.reason);
+  const dates = sd === ed ? fmt(sd) : `${fmt(sd)} → ${fmt(ed)}`;
+  const [links, setLinks] = useState(null);
+  const [loadingV, setLoadingV] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function notify() {
+    setLoadingV(true);
+    try {
+      const { links: vl } = await api.getViberLinks(item.id);
+      setLinks(vl);
+      if (vl[0]) await copyText(vl[0].messagePreview);
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setLoadingV(false); }
+  }
+  async function openViber(lk) { await copyText(lk.messagePreview); window.location.href = lk.viberUrl; }
+
+  const Detail = ({ label, value }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '11px 16px' }}>
+      <span className="t-body" style={{ color: 'var(--label-2)' }}>{label}</span>
+      <span className="t-body" style={{ fontWeight: 500, textAlign: 'right' }}>{value}</span>
+    </div>
+  );
+
+  return (
+    <Sheet title="Leave details" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Group>
+          <Detail label="Type" value={name}/>
+          <Detail label="Duration" value={`${item.days} working day${item.days > 1 ? 's' : ''}`}/>
+          <Detail label="Dates" value={dates}/>
+        </Group>
+        {(reason || urgent) && (
+          <Card pad={14} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {reason && <div><div className="t-caption">Reason</div><div className="t-body" style={{ marginTop: 2 }}>{reason}</div></div>}
+            {urgent && <div><div className="t-caption">Urgent task / handover</div><div className="t-body" style={{ marginTop: 2 }}>{urgent}</div></div>}
+          </Card>
+        )}
+
+        {links === null
+          ? <Btn variant="viber" full leading="message-circle" loading={loadingV} onClick={notify}>Notify via Viber</Btn>
+          : links.length === 0
+            ? <Card pad={14}><p className="t-footnote">No Viber recipients. Add them in Settings → Viber.</p></Card>
+            : <Group header="Open in Viber">
+                {links.map(lk => (
+                  <Row key={lk.id} onClick={() => openViber(lk)} icon="message-circle" iconBg="var(--viber-soft)" iconColor="var(--viber)"
+                    title={lk.recipientName} titleWeight={600} subtitle={lk.phone}
+                    trailing={<span style={{ color: 'var(--tint)', display: 'inline-flex' }}><Icon name="arrow-right" size={18}/></span>}/>
+                ))}
+              </Group>}
+        {links && links.length > 0 && (
+          <button onClick={async () => { const ok = await copyText(links[0].messagePreview); setCopied(ok); toast(ok ? 'Message copied.' : 'Copy failed.', ok ? 'ok' : 'error'); }}
+            className="press" style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--fill)', borderRadius: 8, padding: '6px 12px', color: copied ? 'var(--ok)' : 'var(--tint)', fontSize: 13, fontWeight: 600 }}>
+            <Icon name={copied ? 'check' : 'copy'} size={14}/>{copied ? 'Copied' : 'Copy message'}
+          </button>
+        )}
+
+        <Btn variant="danger" full leading="trash-2" onClick={() => onCancel(item.id)}>Cancel this leave</Btn>
+      </div>
+    </Sheet>
   );
 }
 
@@ -767,6 +840,7 @@ function ApplyScreen({ leaveTypes, recipients, onClose, onSuccess, toast }) {
 function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
   const [filter, setFilter] = useState('all');
   const [busy, setBusy] = useState(null);
+  const [detail, setDetail] = useState(null);
 
   async function cancel(id) {
     setBusy(id);
@@ -823,9 +897,15 @@ function HistoryScreen({ leaveTypes, history, onRefresh, toast }) {
 
       {filtered.length === 0
         ? <p className="t-footnote" style={{ textAlign: 'center', padding: '16px 0' }}>No entries for this filter.</p>
-        : <Group footer="Cancel a leave to restore its balance.">
-            {filtered.map(h => <HistoryRow key={h.id} item={h} onCancel={cancel} busy={busy === h.id}/>)}
+        : <Group footer="Tap a leave for full details. Or cancel to restore its balance.">
+            {filtered.map(h => <HistoryRow key={h.id} item={h} onCancel={cancel} busy={busy === h.id} onOpen={() => setDetail(h)}/>)}
           </Group>}
+
+      {detail && (
+        <LeaveDetailSheet item={detail} toast={toast}
+          onClose={() => setDetail(null)}
+          onCancel={(id) => { setDetail(null); cancel(id); }}/>
+      )}
     </div>
   );
 }
@@ -855,7 +935,7 @@ function LeaveTypesTab({ leaveTypes, onRefresh, toast }) {
   async function save(vals) {
     setBusy(true);
     try {
-      if (editing.id) { await api.updateLeaveType(editing.id, { name: vals.name, total: Number(vals.total), color: editing.color || '#FF6A3D' }); toast('Leave type updated.'); }
+      if (editing.id) { await api.updateLeaveType(editing.id, { name: vals.name, total: Number(vals.total), used: Number(vals.used), color: editing.color || '#FF6A3D' }); toast('Leave type updated.'); }
       else { await api.addLeaveType({ name: vals.name, total: Number(vals.total), color: '#FF6A3D' }); toast('Leave type added.'); }
       setEditing(null); onRefresh();
     } catch (err) { toast(err.message, 'error'); }
@@ -875,7 +955,7 @@ function LeaveTypesTab({ leaveTypes, onRefresh, toast }) {
               subtitle={`${lt.used} used · ${Math.max(0, lt.total - lt.used)} left · ${lt.total} total`}
               trailing={
                 <span style={{ display: 'inline-flex', gap: 4 }}>
-                  <button className="press" onClick={() => setEditing({ id: lt.id, name: lt.name, total: lt.total, color: lt.color })} aria-label="Edit" style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--fill)', color: 'var(--label-2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={15}/></button>
+                  <button className="press" onClick={() => setEditing({ id: lt.id, name: lt.name, total: lt.total, used: lt.used, color: lt.color })} aria-label="Edit" style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--fill)', color: 'var(--label-2)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={15}/></button>
                   <button className="press" onClick={() => setConfirm({ msg: `Delete "${lt.name}"? Past history stays.`, confirmLabel: 'Delete', danger: true, onConfirm: () => remove(lt.id) })} aria-label="Delete" style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--fill)', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="trash-2" size={15}/></button>
                 </span>
               }/>
@@ -894,15 +974,20 @@ function LeaveTypesTab({ leaveTypes, onRefresh, toast }) {
 function LeaveTypeSheet({ initial, onClose, onSave, busy }) {
   const [name, setName] = useState(initial.name || '');
   const [total, setTotal] = useState(initial.total ?? 10);
-  const canSave = name.trim().length > 0 && Number(total) > 0;
+  const [used, setUsed] = useState(initial.used ?? 0);
+  const canSave = name.trim().length > 0 && Number(total) > 0 && Number(used) >= 0;
   return (
     <Sheet title={initial.id ? 'Edit leave type' : 'Add leave type'} onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Input label="Name" placeholder="e.g. Annual, Sick…" value={name} onChange={e => setName(e.target.value)} autoFocus/>
         <Input label="Total days per year" type="number" min="1" value={total} onChange={e => setTotal(e.target.value)}/>
+        {initial.id && (
+          <Input label="Days used" type="number" min="0" value={used} onChange={e => setUsed(e.target.value)}
+            hint="Adjust to correct your balance — e.g. when setting up, or after a manual change."/>
+        )}
         <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
           <Btn variant="secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</Btn>
-          <Btn onClick={() => onSave({ name: name.trim(), total })} disabled={!canSave} loading={busy} style={{ flex: 2 }}>{initial.id ? 'Save' : 'Add'}</Btn>
+          <Btn onClick={() => onSave({ name: name.trim(), total, used })} disabled={!canSave} loading={busy} style={{ flex: 2 }}>{initial.id ? 'Save' : 'Add'}</Btn>
         </div>
       </div>
     </Sheet>

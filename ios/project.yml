@@ -12,10 +12,9 @@ settings:
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     PRODUCT_BUNDLE_IDENTIFIER: com.kalhujinni.salam
-    # Simulator builds need no signing; set a team here for device/TestFlight.
+    # Automatic signing with your Apple Development team (for device installs).
     CODE_SIGN_STYLE: Automatic
-    CODE_SIGNING_REQUIRED: "NO"
-    CODE_SIGNING_ALLOWED: "NO"
+    DEVELOPMENT_TEAM: V43RF83JNX
 
 targets:
   Salam:

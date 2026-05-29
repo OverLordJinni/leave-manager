@@ -99,10 +99,12 @@ router.post('/types', async (req, res) => {
 router.put('/types/:id', async (req, res) => {
   const name  = req.body.name  !== undefined ? clean(req.body.name,  80) : undefined;
   const total = req.body.total !== undefined ? parseInt(req.body.total, 10) : undefined;
+  const used  = req.body.used  !== undefined ? parseInt(req.body.used,  10) : undefined;
   const color = req.body.color !== undefined ? clean(req.body.color,  7)  : undefined;
   const errs  = [];
   if (name  !== undefined && !name)                              errs.push('name cannot be empty');
   if (total !== undefined && (isNaN(total)||total<1||total>365)) errs.push('total must be 1–365');
+  if (used  !== undefined && (isNaN(used)||used<0||used>400))    errs.push('used must be 0–400');
   if (color !== undefined && !isColor(color))                    errs.push('color must be #RRGGBB');
   if (errs.length) return res.status(400).json({ error: errs.join('; ') });
 
@@ -112,6 +114,7 @@ router.put('/types/:id', async (req, res) => {
       UPDATE leave_types SET
         name  = COALESCE(${name  ?? null}, name),
         total = COALESCE(${total ?? null}, total),
+        used  = COALESCE(${used  ?? null}, used),
         color = COALESCE(${color ?? null}, color)
       WHERE id = ${req.params.id} AND user_id = ${req.userId}
       RETURNING *`;

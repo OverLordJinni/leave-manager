@@ -97,8 +97,8 @@ final class API {
     func addLeaveType(name: String, total: Int, color: String) async throws {
         _ = try await data("/api/leave/types", method: "POST", json: ["name": name, "total": total, "color": color])
     }
-    func updateLeaveType(id: String, name: String, total: Int, color: String) async throws {
-        _ = try await data("/api/leave/types/\(id)", method: "PUT", json: ["name": name, "total": total, "color": color])
+    func updateLeaveType(id: String, name: String, total: Int, used: Int, color: String) async throws {
+        _ = try await data("/api/leave/types/\(id)", method: "PUT", json: ["name": name, "total": total, "used": used, "color": color])
     }
     func deleteLeaveType(id: String) async throws {
         _ = try await data("/api/leave/types/\(id)", method: "DELETE")

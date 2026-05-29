@@ -57,9 +57,10 @@ function buildMessage(entry, userName, leaveTypes, recipientName) {
 }
 
 function buildViberUrl(phone, message) {
-  // Viber's number= param requires digits only — strip +, spaces, dashes, etc.
-  const digits = phone.replace(/\D/g, '');
-  const url = `viber://chat?number=${digits}&draft=${encodeURIComponent(message)}`;
+  // Use the full +E.164 number (URL-encoded). Viber matches a saved contact far
+  // more reliably with the country code + leading "+" than with bare digits.
+  const e164 = '+' + phone.replace(/\D/g, '');
+  const url = `viber://chat?number=${encodeURIComponent(e164)}&draft=${encodeURIComponent(message)}`;
   if (!url.startsWith('viber://')) throw new Error('Invalid Viber URL');
   return url;
 }

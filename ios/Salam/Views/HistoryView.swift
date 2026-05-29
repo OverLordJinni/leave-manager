@@ -18,7 +18,7 @@ struct HistoryRowView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 6).padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 
     private var dateLine: String {
@@ -64,16 +64,17 @@ struct HistoryView: View {
 
                         Section {
                             ForEach(filtered) { entry in
-                                HistoryRowView(entry: entry)
-                                    .listRowInsets(EdgeInsets())
-                                    .swipeActions(edge: .trailing) {
-                                        Button(role: .destructive) { pendingCancel = entry } label: {
-                                            Label("Cancel", systemImage: "trash")
-                                        }
+                                NavigationLink(destination: LeaveDetailView(entry: entry)) {
+                                    HistoryRowView(entry: entry)
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) { pendingCancel = entry } label: {
+                                        Label("Cancel", systemImage: "trash")
                                     }
+                                }
                             }
                         } footer: {
-                            Text("Swipe a leave to cancel it and restore the balance.")
+                            Text("Tap a leave to see full details. Swipe to cancel and restore the balance.")
                         }
                     }
                     .listStyle(.insetGrouped)
