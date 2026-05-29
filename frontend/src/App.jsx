@@ -338,28 +338,82 @@ function Brand({ size = 66, icon = 'sun' }) {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 function AuthScreen({ onLogin, dark, onToggleDark }) {
-  const [view, setView] = useState('login');
-  return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 18px 0' }}>
-        <ThemeToggle dark={dark} onToggle={onToggleDark}/>
-      </div>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        maxWidth: 420, margin: '0 auto', width: '100%', padding: '12px 22px calc(env(safe-area-inset-bottom, 0px) + 28px)' }}>
-        {view === 'login'  && <LoginForm  onLogin={onLogin} onSwitch={setView}/>}
-        {view === 'signup' && <SignupForm onLogin={onLogin} onSwitch={setView}/>}
-        {view === 'forgot' && <ForgotForm onSwitch={setView}/>}
-      </div>
-    </div>
-  );
-}
+  const [sheet, setSheet] = useState(null); // 'login' | 'signup' | 'forgot'
+  const [pkErr, setPkErr] = useState('');
+  const [pkLoading, setPkLoad] = useState(false);
 
-function AuthHead({ icon = 'sun', title, body }) {
+  async function signInWithPasskey() {
+    if (!window.PublicKeyCredential) { setPkErr('Passkeys are not supported on this browser.'); return; }
+    setPkLoad(true); setPkErr('');
+    try {
+      const options = await api.getPasskeyLoginChallenge();
+      const authResp = await startAuthentication({ optionsJSON: options });
+      await api.loginPasskey(authResp);
+      onLogin();
+    } catch (e) {
+      if (e.name === 'NotAllowedError' || e.name === 'AbortError') setPkErr('Passkey sign-in was cancelled.');
+      else setPkErr(e.message || 'Passkey sign-in failed.');
+    } finally { setPkLoad(false); }
+  }
+
+  const titles = { login: 'Welcome back', signup: 'Create account', forgot: 'Reset password' };
+
   return (
-    <div style={{ textAlign: 'center', marginBottom: 26 }}>
-      <Brand icon={icon}/>
-      <h1 className="t-large" style={{ marginTop: 18 }}>{title}</h1>
-      {body && <p className="t-subhead" style={{ marginTop: 7, lineHeight: 1.4 }}>{body}</p>}
+    <div style={{ minHeight: '100dvh', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+      background: 'linear-gradient(180deg, #1A1430 0%, #281629 46%, #3A2016 100%)' }}>
+      {/* sunset glow */}
+      <div aria-hidden style={{ position: 'absolute', top: '30%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: 540, height: 540, borderRadius: '50%', pointerEvents: 'none',
+        background: 'radial-gradient(circle, rgba(255,122,61,0.55), rgba(255,178,77,0.16) 42%, transparent 68%)' }}/>
+      <div aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+        background: 'linear-gradient(180deg, transparent 48%, rgba(18,11,20,0.88) 100%)' }}/>
+
+      <button onClick={onToggleDark} aria-label="Toggle theme" className="press"
+        style={{ position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 14px)', right: 18, zIndex: 3,
+          width: 38, height: 38, borderRadius: 999, background: 'rgba(255,255,255,0.14)',
+          border: '1px solid rgba(255,255,255,0.25)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={dark ? 'sun' : 'moon'} size={18}/>
+      </button>
+
+      {/* brand */}
+      <div style={{ flex: 1, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 24 }}>
+        <div style={{ width: 60, height: 60, borderRadius: 18, background: 'var(--accent-grad)', boxShadow: '0 10px 28px rgba(255,106,61,0.45)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
+          <Icon name="sun" size={30} style={{ color: '#fff' }}/>
+        </div>
+        <div style={{ fontSize: 46, fontWeight: 800, letterSpacing: '0.16em', color: '#fff', textIndent: '0.16em', lineHeight: 1 }}>SALAM</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 14 }}>
+          <span style={{ width: 20, height: 2, background: 'var(--accent)', borderRadius: 2 }}/>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '2.5px', color: 'var(--accent)' }}>PERSONAL LEAVE TRACKER</span>
+          <span style={{ width: 20, height: 2, background: 'var(--accent)', borderRadius: 2 }}/>
+        </div>
+      </div>
+
+      {/* bottom auth */}
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 460, margin: '0 auto',
+        padding: '0 24px calc(env(safe-area-inset-bottom, 0px) + 28px)', display: 'flex', flexDirection: 'column', gap: 11 }}>
+        <Btn full leading="mail" onClick={() => setSheet('login')}>Continue with email</Btn>
+        {window.PublicKeyCredential && (
+          <button onClick={signInWithPasskey} className="press"
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', minHeight: 52,
+              borderRadius: 'var(--r-control)', background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.18)',
+              color: '#fff', fontSize: 17, fontWeight: 600 }}>
+            {pkLoading ? <Spin size={19} color="#fff"/> : <><Icon name="fingerprint" size={19}/>Continue with passkey</>}
+          </button>
+        )}
+        <button onClick={() => setSheet('signup')} className="press"
+          style={{ background: 'none', border: 0, color: 'var(--accent)', fontSize: 15, fontWeight: 600, padding: 8, minHeight: 44 }}>Create account</button>
+        {pkErr && <p style={{ color: '#FF9A7E', fontSize: 13, textAlign: 'center', margin: 0 }}>{pkErr}</p>}
+        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, textAlign: 'center', margin: '2px 0 0' }}>By continuing you agree to the Terms &amp; Privacy Policy.</p>
+      </div>
+
+      {sheet && (
+        <Sheet title={titles[sheet]} onClose={() => setSheet(null)}>
+          {sheet === 'login'  && <LoginForm  onLogin={onLogin} onSwitch={setSheet}/>}
+          {sheet === 'signup' && <SignupForm onLogin={onLogin} onSwitch={setSheet}/>}
+          {sheet === 'forgot' && <ForgotForm onSwitch={setSheet}/>}
+        </Sheet>
+      )}
     </div>
   );
 }
@@ -373,7 +427,6 @@ function LoginForm({ onLogin, onSwitch }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
-  const [pkLoading, setPkLoad] = useState(false);
 
   async function submit(e) {
     e?.preventDefault?.();
@@ -384,45 +437,16 @@ function LoginForm({ onLogin, onSwitch }) {
     finally { setLoading(false); }
   }
 
-  async function signInWithPasskey() {
-    if (!window.PublicKeyCredential) { setErr('Passkeys are not supported on this browser.'); return; }
-    setPkLoad(true); setErr('');
-    try {
-      const options = await api.getPasskeyLoginChallenge();
-      const authResp = await startAuthentication({ optionsJSON: options });
-      await api.loginPasskey(authResp);
-      onLogin();
-    } catch (e) {
-      if (e.name === 'NotAllowedError' || e.name === 'AbortError') setErr('Passkey sign-in was cancelled.');
-      else setErr(e.message || 'Passkey sign-in failed.');
-    } finally { setPkLoad(false); }
-  }
-
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <AuthHead title="Welcome to Salam" body="Your leave balance, on every device."/>
       <Input label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)}
-        placeholder="you@email.com" autoComplete="email"/>
+        placeholder="you@email.com" autoComplete="email" autoFocus/>
       <PasswordInput value={pw} onChange={e => setPw(e.target.value)} placeholder="Your password"
         autoComplete="current-password" error={err}/>
       <Btn full type="submit" loading={loading}>Sign in</Btn>
-
-      {window.PublicKeyCredential && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0' }}>
-            <div style={{ flex: 1, height: 1, background: 'var(--separator)' }}/>
-            <span className="t-caption" style={{ color: 'var(--label-3)' }}>or</span>
-            <div style={{ flex: 1, height: 1, background: 'var(--separator)' }}/>
-          </div>
-          <Btn full variant="tinted" leading="fingerprint" loading={pkLoading} onClick={signInWithPasskey}>
-            Continue with passkey
-          </Btn>
-        </>
-      )}
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
         <LinkBtn onClick={() => onSwitch('forgot')}>Forgot password?</LinkBtn>
-        <span className="t-subhead">No account? <LinkBtn onClick={() => onSwitch('signup')}>Sign up</LinkBtn></span>
+        <span className="t-subhead">New here? <LinkBtn onClick={() => onSwitch('signup')}>Create account</LinkBtn></span>
       </div>
     </form>
   );
@@ -449,7 +473,6 @@ function SignupForm({ onLogin, onSwitch }) {
 
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <AuthHead title="Create your account" body="One account, every device. Your data stays yours."/>
       <Input label="Name (optional)" value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="name"/>
       <Input label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" autoComplete="email"/>
       <PasswordInput value={pw} onChange={e => setPw(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password"/>
@@ -477,7 +500,6 @@ function ForgotForm({ onSwitch }) {
 
   return (
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <AuthHead icon="mail" title="Reset password" body="We'll send a reset link if an account exists for that email."/>
       {sent ? (
         <Card pad={16} style={{ background: 'var(--accent-soft)' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
